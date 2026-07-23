@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Interview Reminder</h2>
+<p>Dear {{ name }},</p>
+<p>This is a gentle reminder regarding your upcoming interview for the <strong>{{ job_title }}</strong> position.</p>
+<p><strong>Date & Time:</strong> {{ datetime }}</p>
+<p>We look forward to speaking with you and learning more about your experience.</p>
+<br>
+<p>Best regards,<br>The TalentFlow-AI Recruitment Team</p>
+{% endblock %}

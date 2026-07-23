@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Interview Scheduled</h2>
+<p>Dear {{ name }},</p>
+<p>We are pleased to inform you that your interview for the <strong>{{ job_title }}</strong> position has been scheduled.</p>
+<p><strong>Date & Time:</strong> {{ datetime }}</p>
+<p>Please ensure you are ready at least 5 minutes before the scheduled time. If this time does not work for you, please let us know as soon as possible to reschedule.</p>
+<br>
+<p>Best regards,<br>The TalentFlow-AI Recruitment Team</p>
+{% endblock %}

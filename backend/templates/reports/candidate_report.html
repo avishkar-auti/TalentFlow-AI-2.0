@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e3a5f; padding: 40px; }
+        .header { text-align: center; color: #0d9488; border-bottom: 2px solid #0d9488; padding-bottom: 10px; margin-bottom: 30px; }
+        .brand { font-size: 24px; font-weight: bold; letter-spacing: 1px; }
+        .score-container { margin: 20px 0; }
+        .score-row { display: flex; align-items: center; margin-bottom: 10px; }
+        .score-label { width: 150px; font-weight: bold; }
+        .bar-container { flex-grow: 1; background-color: #e2e8f0; border-radius: 4px; overflow: hidden; height: 20px; }
+        .bar { background-color: #0d9488; height: 100%; color: white; text-align: right; padding-right: 5px; font-size: 12px; line-height: 20px; }
+        .recommendation { font-size: 18px; padding: 15px; background-color: #f0fdfa; border-left: 4px solid #0d9488; margin: 20px 0; }
+        .ai-summary { background-color: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; }
+        h3 { color: #1e3a5f; margin-top: 25px; }
+        ul { margin-top: 5px; padding-left: 20px; }
+        li { margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="brand">TalentFlow-AI</div>
+        <h1>Candidate Evaluation Report</h1>
+    </div>
+    
+    <h2>Candidate Profile: {{ candidate_id }}</h2>
+    <p><strong>Job Reference:</strong> {{ job_id }}</p>
+    
+    <div class="recommendation">
+        <strong>Overall Recommendation:</strong> <span style="color: #0d9488; font-weight: bold; font-size: 20px;">{{ recommendation }}</span> 
+        (Score: {{ "%.1f"|format(overall_score) }})
+    </div>
+    
+    <h3>Score Breakdown</h3>
+    <div class="score-container">
+        <div class="score-row">
+            <div class="score-label">Resume (15%)</div>
+            <div class="bar-container"><div class="bar" style="width: {{ score_breakdown.resume_score }}%;">{{ score_breakdown.resume_score }}</div></div>
+        </div>
+        <div class="score-row">
+            <div class="score-label">ATS Match (10%)</div>
+            <div class="bar-container"><div class="bar" style="width: {{ score_breakdown.ats_score }}%;">{{ score_breakdown.ats_score }}</div></div>
+        </div>
+        <div class="score-row">
+            <div class="score-label">Role Match (20%)</div>
+            <div class="bar-container"><div class="bar" style="width: {{ score_breakdown.matching_score }}%;">{{ score_breakdown.matching_score }}</div></div>
+        </div>
+        <div class="score-row">
+            <div class="score-label">Background (10%)</div>
+            <div class="bar-container"><div class="bar" style="width: {{ score_breakdown.background_score }}%;">{{ score_breakdown.background_score }}</div></div>
+        </div>
+        <div class="score-row">
+            <div class="score-label">Technical (30%)</div>
+            <div class="bar-container"><div class="bar" style="width: {{ score_breakdown.technical_score }}%;">{{ score_breakdown.technical_score }}</div></div>
+        </div>
+        <div class="score-row">
+            <div class="score-label">Communication (15%)</div>
+            <div class="bar-container"><div class="bar" style="width: {{ score_breakdown.speech_score }}%;">{{ score_breakdown.speech_score }}</div></div>
+        </div>
+    </div>
+
+    <div class="ai-summary">
+        <h3>AI Advisor Summary</h3>
+        <p>{{ remarks }}</p>
+        
+        <h4>Key Strengths</h4>
+        <ul>
+            {% for strength in strengths %}
+                <li>{{ strength }}</li>
+            {% endfor %}
+        </ul>
+        
+        <h4>Areas of Concern</h4>
+        <ul>
+            {% for concern in concerns %}
+                <li>{{ concern }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>

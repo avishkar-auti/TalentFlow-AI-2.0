@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app/backend
+      - ./agents:/app/agents
+      - ./tools:/app/tools
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+    environment:
+      - HOST=0.0.0.0
+    restart: unless-stopped
+
+  recruiter-dashboard:
+    image: node:18-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend/recruiter-dashboard:/app
+    ports:
+      - "3000:3000"
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    restart: unless-stopped
+
+  candidate-portal:
+    image: node:18-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend/candidate-portal:/app
+    ports:
+      - "3001:3001"
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    restart: unless-stopped
