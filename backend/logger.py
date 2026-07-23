@@ -97,3 +97,16 @@ api_logger = setup_logger("api", "api.log")
 agents_logger = setup_logger("agents", "agents.log")
 firebase_logger = setup_logger("firebase", "firebase.log")
 errors_logger = setup_logger("errors", "errors.log")
+
+def get_logger(name: str = "api") -> structlog.BoundLogger:
+    """Get or setup a logger by name."""
+    loggers = {
+        "api": api_logger,
+        "agents": agents_logger,
+        "firebase": firebase_logger,
+        "errors": errors_logger,
+    }
+    if name in loggers:
+        return loggers[name]
+    return setup_logger(name, f"{name}.log")
+

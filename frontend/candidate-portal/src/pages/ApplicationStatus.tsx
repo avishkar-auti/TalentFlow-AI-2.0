@@ -37,9 +37,10 @@ export function ApplicationStatus() {
             {
               id: '2',
               title: 'Resume & AST Analysis',
-              description: `Qualifications scanned with ATS match score of ${data.atsScore || 88}%.`,
+              description: `Qualifications scanned with ATS match score of ${Math.round(data.atsScore || data.overallMatch || data.overallScore || 85)}%.`,
               date: new Date().toISOString(),
               isComplete: true
+
             },
             {
               id: '3',

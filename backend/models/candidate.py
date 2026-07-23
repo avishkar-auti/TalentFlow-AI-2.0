@@ -15,6 +15,12 @@ class Candidate(BaseModel):
     status: str = Field(default="active")
     applied_job_id: Optional[str] = Field(default=None, alias="jobId")
     job_id: Optional[str] = None
+    job_title: Optional[str] = Field(default=None, alias="jobTitle")
+    ats_score: Optional[float] = Field(default=None, alias="atsScore")
+    atsScore: Optional[float] = None
+    overallScore: Optional[float] = None
+    overallMatch: Optional[float] = None
+    skills: Any = Field(default_factory=list)
     created_at: Optional[Any] = Field(default=None, alias="createdAt")
     updated_at: Optional[Any] = Field(default=None, alias="updatedAt")
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -37,7 +43,21 @@ class Candidate(BaseModel):
                 data["jobId"] = job_id
             
             # Ensure stage exists
-            stage = data.get("pipeline_stage") or data.get("stage") or "applied"
+            stage = data.get("pipeline_stage") or data.get("stage") or data.get("pipelineStage") or "applied"
             data["pipeline_stage"] = str(stage).lower()
             data["stage"] = str(stage).lower()
+            data["pipelineStage"] = str(stage).lower()
+
+            # Ensure ATS and Match scores are synced across alias forms
+            score_val = data.get("overallScore") or data.get("atsScore") or data.get("overallMatch") or data.get("ats_score")
+            if score_val is not None:
+                try:
+                    f_val = float(score_val)
+                    data["ats_score"] = f_val
+                    data["atsScore"] = f_val
+                    data["overallScore"] = f_val
+                    data["overallMatch"] = f_val
+                except (ValueError, TypeError):
+                    pass
         return data
+

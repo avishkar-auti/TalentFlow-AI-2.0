@@ -32,15 +32,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan
     )
 
-    origins = [origin.strip() for origin in settings.cors_origins.split(",")]
+    origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip() and origin.strip() != "*"]
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=origins if origins else ["*"],
+        allow_origins=origins if origins else ["http://localhost:3000", "http://localhost:3001", "http://localhost:5173", "http://localhost:5174"],
+        allow_origin_regex=r"http://localhost:\d+",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
 
     @app.middleware("http")
     async def request_middleware(request: Request, call_next):

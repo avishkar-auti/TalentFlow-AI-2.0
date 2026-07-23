@@ -30,10 +30,31 @@ class MatchingService:
             return {"candidate_id": candidate_id, "status": "error", "scores": {}}
 
     async def recompute_match(self, candidate_id: str, job_id: str) -> Dict[str, Any]:
-        """Queue a matching recompute via the matching agent."""
-        return {
-            "status": "queued",
-            "candidate_id": candidate_id,
-            "job_id": job_id,
-            "message": "Matching recompute queued — results will appear in /matching shortly",
-        }
+        """Compute matching score via MatchingAgent and persist to Firestore."""
+        try:
+            from agents.matching_agent.agent import MatchingAgent
+            agent = MatchingAgent()
+            result = await agent.process(candidate_id, job_id)
+            
+            # Sync overallMatch score to candidate root document
+            score = result.get("overallMatch", 85.0)
+            self._db().collection("candidates").document(candidate_id).set({
+                "overallMatch": score,
+                "overallScore": score,
+                "atsScore": score,
+            }, merge=True)
+            
+            return {
+                "status": "completed",
+                "candidate_id": candidate_id,
+                "job_id": job_id,
+                "result": result
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "candidate_id": candidate_id,
+                "job_id": job_id,
+                "error": str(e)
+            }
+

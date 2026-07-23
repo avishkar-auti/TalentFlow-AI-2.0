@@ -42,4 +42,5 @@ class DashboardService:
 
     async def get_recent_activity(self, limit: int = 20) -> List[Dict[str, Any]]:
         activities = await self.act_repo.get_recent(limit)
-        return [a.model_dump() for a in activities]
+        return [a.model_dump() if hasattr(a, 'model_dump') else a for a in activities]
+

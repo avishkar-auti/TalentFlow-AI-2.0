@@ -25,7 +25,7 @@ class ActivityLogRepository(BaseRepository[ActivityLog]):
         try:
             logs = await self.query(filters=[], limit=limit)
             logs.sort(key=lambda x: str(getattr(x, "timestamp", "")), reverse=True)
-            return [l.model_dump() for l in logs]
+            return [l.model_dump() if hasattr(l, "model_dump") else l for l in logs]
         except Exception:
             return []
 
@@ -33,6 +33,6 @@ class ActivityLogRepository(BaseRepository[ActivityLog]):
         try:
             logs = await self.query(filters=[('candidateId', '==', candidate_id)])
             logs.sort(key=lambda x: str(getattr(x, "timestamp", "")), reverse=True)
-            return [l.model_dump() for l in logs]
+            return [l.model_dump() if hasattr(l, "model_dump") else l for l in logs]
         except Exception:
             return []
