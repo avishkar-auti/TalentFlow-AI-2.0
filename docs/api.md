@@ -386,20 +386,34 @@ Conclude an interview session.
 - **Auth**: Bearer Token
 - **Response `200 OK`**: `{"id": "int_301", "status": "completed", "ended_at": "2026-07-25T14:45:00Z"}`
 
-#### `GET /api/v1/interviews/{id}/proctoring-logs`
-Retrieve proctoring violation logs (multiple faces, no face, tab switch, etc.).
+#### `GET /api/v1/candidates/{id}/interview/{interview_id}/proctoring-flags`
+Retrieve objective proctoring flags for an interview session.
 
 - **Auth**: Bearer Token (`recruiter`, `admin`)
 - **Response `200 OK`**:
 ```json
 {
   "interview_id": "int_301",
-  "proctoring_logs": [
+  "total_flags": 3,
+  "summary": "3 flag(s) detected",
+  "flags": [
     {
-      "timestamp": "2026-07-25T14:15:30Z",
-      "flag": "looking_away",
-      "confidence": 0.92,
-      "frame_snapshot_url": "https://storage.googleapis.com/..."
+      "event": "gaze_away_from_screen",
+      "start": "00:04:12",
+      "duration_s": 6.0,
+      "timestamp": "2026-07-25T14:04:18Z",
+      "details": {
+        "direction": "looking_down"
+      }
+    },
+    {
+      "event": "head_turned_away",
+      "start": "00:09:30",
+      "duration_s": 3.0,
+      "timestamp": "2026-07-25T14:09:33Z",
+      "details": {
+        "head_pose": "turned_away"
+      }
     }
   ]
 }
@@ -409,45 +423,65 @@ Retrieve proctoring violation logs (multiple faces, no face, tab switch, etc.).
 
 ### 4.6 WebSocket Protocol for Interview Stream
 
-#### `WS /api/v1/interviews/{interview_id}/stream`
-Real-time bi-directional streaming for live AI video/audio interview sessions and OpenCV proctoring.
+#### `WS /ws/interview/{interview_id}`
+Real-time bi-directional streaming for live AI interview flow (text/audio control channel).
+
+#### `WS /ws/interview/{interview_id}/vision`
+Dedicated vision/proctoring channel for frame analysis.
 
 #### Connection Lifecycle
-1. **Client connects**: `ws://localhost:8000/api/v1/interviews/int_301/stream?token=<firebase_id_token>`
+1. **Client connects**: `ws://localhost:8000/ws/interview/int_301/vision`
 2. **Handshake**: Server verifies token & interview status. Sends initial greeting frame.
-3. **Streaming loop**: Client streams audio/video chunks, receives AI questions and proctoring warnings.
+3. **Streaming loop**: Client streams base64 JPEG frames, receives objective proctoring signal outputs.
 
-#### Client to Server Message Frames (JSON format)
+#### Client to Server Message Frames (vision channel)
 ```json
 {
-  "type": "audio_chunk",
-  "timestamp": 1721782800123,
-  "data": "<base64_encoded_pcm_audio_data>"
+  "type": "frame",
+  "data": "<base64_encoded_jpeg_image>",
+  "reference_photo": "<optional_base64_photo_for_identity_check>"
 }
 ```
 ```json
 {
-  "type": "video_frame",
-  "timestamp": 1721782800456,
-  "data": "<base64_encoded_jpeg_image>"
+  "type": "ping"
 }
 ```
 
-#### Server to Client Response Frames (JSON format)
+#### Server to Client Response Frames (vision channel)
 ```json
 {
-  "type": "ai_response",
-  "timestamp": 1721782802000,
-  "text": "Could you explain how you design distributed state machines in Python?",
-  "audio": "<base64_encoded_tts_audio>"
+  "type": "vision_result",
+  "timestamp": "2026-07-25T14:04:18Z",
+  "face_count": 1,
+  "face_detected": true,
+  "gaze_direction": "looking_down",
+  "gaze_state": "looking_down",
+  "gaze_offset": 0.41,
+  "head_pose": {
+    "yaw": 4.5,
+    "pitch": 23.1,
+    "roll": -1.2,
+    "is_turned_away": true,
+    "state": "turned_away"
+  },
+  "head_pose_state": "turned_away",
+  "ear_value": 0.24,
+  "identity_match_score": null,
+  "landmarks_backend": "mediapipe_face_mesh",
+  "flags": [
+    {
+      "event": "head_turned_away",
+      "timestamp": "2026-07-25T14:04:18Z",
+      "start_timestamp": "14:04:15",
+      "duration_seconds": 3.0
+    }
+  ]
 }
 ```
 ```json
 {
-  "type": "proctor_warning",
-  "timestamp": 1721782805000,
-  "flag": "multiple_faces",
-  "message": "Warning: Multiple faces detected in video frame."
+  "type": "pong"
 }
 ```
 

@@ -6,7 +6,8 @@ import base64
 import cv2
 import numpy as np
 import logging
-from typing import Dict, Any, Optional, List
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional
 
 from .landmarks import FaceMeshExtractor
 from .gaze import calculate_gaze_ratio
@@ -41,7 +42,15 @@ class VisionProctoring:
             frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
             if frame is None:
-                return {"face_detected": False, "face_count": 0, "flags": []}
+                return {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "face_detected": False,
+                    "face_count": 0,
+                    "gaze_state": "unknown",
+                    "head_pose_state": "unknown",
+                    "identity_match_score": None,
+                    "flags": [],
+                }
 
             h, w, _ = frame.shape
 
@@ -52,6 +61,7 @@ class VisionProctoring:
             gaze_direction = "center"
             head_pose = {"yaw": 0.0, "pitch": 0.0, "roll": 0.0, "is_turned_away": False}
             ear_val = 0.30
+            identity_match_score = None
 
             if face_count > 0 and len(extracted["landmarks_list"]) > 0:
                 landmarks = extracted["landmarks_list"][0]
@@ -63,19 +73,35 @@ class VisionProctoring:
                 face_count=face_count,
                 gaze_direction=gaze_direction,
                 is_head_turned=head_pose["is_turned_away"],
-                ear_value=ear_val
+                ear_value=ear_val,
+                identity_match_score=identity_match_score,
             )
 
+            head_pose_state = head_pose.get("state", "turned_away" if head_pose.get("is_turned_away") else "forward")
+
             return {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "face_detected": face_count > 0,
                 "face_count": face_count,
                 "gaze_direction": gaze_direction,
+                "gaze_state": gaze_direction,
                 "gaze_offset": gaze_offset,
                 "head_pose": head_pose,
+                "head_pose_state": head_pose_state,
                 "ear_value": ear_val,
+                "identity_match_score": identity_match_score,
+                "landmarks_backend": extracted.get("backend", "unknown"),
                 "flags": flags
             }
 
         except Exception as e:
             logger.error(f"Error during vision frame analysis: {e}")
-            return {"face_detected": False, "face_count": 0, "flags": []}
+            return {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "face_detected": False,
+                "face_count": 0,
+                "gaze_state": "unknown",
+                "head_pose_state": "unknown",
+                "identity_match_score": None,
+                "flags": [],
+            }

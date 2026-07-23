@@ -43,7 +43,7 @@ class ProctoringFlagTracker:
             self._reset_event("multiple_faces_detected")
 
         # 3. Gaze Away from Screen (> 2.0s)
-        if gaze_direction in ["looking_left", "looking_right"]:
+        if gaze_direction in ["looking_left", "looking_right", "looking_down"]:
             self._track_event("gaze_away_from_screen", now, threshold_s=2.0, emitted_flags=emitted_flags, details={"direction": gaze_direction})
         else:
             self._reset_event("gaze_away_from_screen")
@@ -82,6 +82,8 @@ class ProctoringFlagTracker:
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "start_timestamp": time.strftime("%H:%M:%S", time.gmtime(self.active_events[event_type])),
                 "duration_seconds": round(duration, 1),
+                "start_epoch_seconds": round(self.active_events[event_type], 3),
+                "end_epoch_seconds": round(now, 3),
                 "details": details,
             }
             emitted_flags.append(flag)

@@ -1,21 +1,47 @@
-"""OpenCV Face, Eye & Gaze Landmark Extractor.
-Uses OpenCV Haar Cascades & Contour Analysis for face detection, eye detection, gaze estimation, and head movement tracking.
+"""Face landmark extraction for proctoring.
+
+MediaPipe Face Mesh is used as the primary backend (with iris landmarks),
+and OpenCV Haar cascades are retained as a fallback when MediaPipe is
+unavailable.
 """
 import cv2
 import numpy as np
 import logging
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
 class FaceMeshExtractor:
-    """OpenCV-based Face & Eye Landmark Extractor."""
+    """MediaPipe-first face landmark extractor with OpenCV fallback."""
 
     def __init__(self):
+        self._mp_face_mesh = None
+        self._mp_name: Optional[str] = None
+
         self.face_cascade = None
         self.eye_cascade = None
         self.profile_cascade = None
+
+        self._init_mediapipe()
         self._init_opencv()
+
+    def _init_mediapipe(self) -> None:
+        try:
+            import mediapipe as mp
+
+            self._mp_face_mesh = mp.solutions.face_mesh.FaceMesh(
+                static_image_mode=False,
+                max_num_faces=3,
+                refine_landmarks=True,
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5,
+            )
+            self._mp_name = "mediapipe_face_mesh"
+            logger.info("MediaPipe Face Mesh initialized for proctoring landmarks.")
+        except Exception as exc:
+            self._mp_face_mesh = None
+            self._mp_name = None
+            logger.warning(f"MediaPipe Face Mesh unavailable, fallback enabled: {exc}")
 
     def _init_opencv(self):
         try:
@@ -30,17 +56,63 @@ class FaceMeshExtractor:
                 self.face_cascade = cv2.CascadeClassifier(face_xml)
                 self.eye_cascade = cv2.CascadeClassifier(eye_xml)
                 self.profile_cascade = cv2.CascadeClassifier(profile_xml)
-                logger.info("OpenCV Haar Cascades loaded successfully for face & eye detection.")
+                logger.info("OpenCV Haar cascades loaded for fallback face/eye detection.")
         except Exception as e:
             logger.warning(f"OpenCV CascadeClassifier init warning: {e}")
 
+    def _extract_with_mediapipe(self, frame: np.ndarray) -> Optional[Dict[str, Any]]:
+        if self._mp_face_mesh is None:
+            return None
+
+        h, w = frame.shape[:2]
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self._mp_face_mesh.process(rgb)
+
+        if not results.multi_face_landmarks:
+            return {
+                "face_count": 0,
+                "landmarks_list": [],
+                "image_size": (w, h),
+                "backend": self._mp_name,
+            }
+
+        landmarks_list = []
+        for face_landmarks in results.multi_face_landmarks:
+            pts = np.zeros((len(face_landmarks.landmark), 3), dtype=np.float32)
+            for idx, lm in enumerate(face_landmarks.landmark):
+                pts[idx] = [lm.x * w, lm.y * h, lm.z * w]
+            landmarks_list.append(pts)
+
+        return {
+            "face_count": len(landmarks_list),
+            "landmarks_list": landmarks_list,
+            "image_size": (w, h),
+            "backend": self._mp_name,
+        }
+
     def extract_landmarks(self, frame: np.ndarray) -> Dict[str, Any]:
         """
-        Processes a BGR frame using OpenCV to detect faces, eye boxes, iris positions, and head orientation.
-        Returns a standardized landmark output compatible with gaze & head pose modules.
+        Extracts normalized landmarks from a BGR frame.
+
+        Returns:
+            {
+                "face_count": int,
+                "landmarks_list": List[np.ndarray],
+                "image_size": (width, height),
+                "backend": str,
+            }
         """
         if frame is None or frame.size == 0:
-            return {"face_count": 0, "landmarks_list": [], "opencv_faces": []}
+            return {
+                "face_count": 0,
+                "landmarks_list": [],
+                "image_size": (0, 0),
+                "backend": "none",
+            }
+
+        mp_result = self._extract_with_mediapipe(frame)
+        if mp_result is not None and mp_result["face_count"] > 0:
+            return mp_result
 
         h, w = frame.shape[:2]
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -66,8 +138,8 @@ class FaceMeshExtractor:
 
         landmarks_list = []
         for (fx, fy, fw, fh) in faces:
-            # Construct a 474-point pseudo 3D landmark array from OpenCV face & eye bounding boxes
-            # to maintain compatibility with gaze.py, head_pose.py, and ear.py!
+            # Construct a 474-point pseudo landmark array from OpenCV detections.
+            # This keeps gaze/head-pose/EAR logic operational when MediaPipe is not available.
             pts = np.zeros((474, 3), dtype=np.float32)
 
             # Nose tip (index 1)
@@ -155,5 +227,6 @@ class FaceMeshExtractor:
             "face_count": len(faces),
             "landmarks_list": landmarks_list,
             "image_size": (w, h),
-            "profile_detected": profile_detected
+            "profile_detected": profile_detected,
+            "backend": "opencv_haar_fallback",
         }

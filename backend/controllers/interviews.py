@@ -143,12 +143,17 @@ async def ws_vision_proctoring(websocket: WebSocket, interview_id: str):
 
                 await websocket.send_json({
                     "type": "vision_result",
+                    "timestamp": result.get("timestamp"),
                     "face_count": result.get("face_count", 0),
                     "face_detected": result.get("face_detected", False),
                     "gaze_direction": result.get("gaze_direction", "unknown"),
+                    "gaze_state": result.get("gaze_state", result.get("gaze_direction", "unknown")),
                     "gaze_offset": result.get("gaze_offset", 0.0),
                     "head_pose": result.get("head_pose", {}),
+                    "head_pose_state": result.get("head_pose_state", "unknown"),
                     "ear_value": result.get("ear_value", 0.0),
+                    "identity_match_score": result.get("identity_match_score"),
+                    "landmarks_backend": result.get("landmarks_backend", "unknown"),
                     "flags": result.get("flags", []),
                 })
 

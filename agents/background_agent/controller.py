@@ -12,7 +12,7 @@ router = APIRouter(
 async def trigger_background_check(
     candidate_id: str = Path(..., description="The ID of the candidate"),
     job_id: str = "default_job_id" # Real app would likely pass in body or query
-):
+)
     """
     Trigger a background check for the candidate.
     """

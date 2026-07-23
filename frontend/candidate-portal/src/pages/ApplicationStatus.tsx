@@ -5,7 +5,7 @@ import { Button } from '../components/ui/Button';
 import { PipelineProgress } from '../components/status/PipelineProgress';
 import { StatusTimeline } from '../components/status/StatusTimeline';
 import { STATUS_MESSAGES } from '../utils/constants';
-import axios from 'axios';
+import api from '../utils/api';
 
 export function ApplicationStatus() {
   const navigate = useNavigate();
@@ -15,15 +15,29 @@ export function ApplicationStatus() {
 
   useEffect(() => {
     async function fetchStatus() {
-      const candId = localStorage.getItem('talentflow_candidate_id');
-      if (!candId) return;
+      let candId = localStorage.getItem('talentflow_candidate_id');
 
       try {
-        const res = await axios.get(`http://localhost:8000/api/v1/candidates/${candId}`);
+        // Fallback to a recent candidate if localStorage ID is missing/stale.
+        if (!candId) {
+          const listRes = await api.get('/candidates');
+          const list = listRes.data?.data || [];
+          if (list.length > 0) {
+            const first = list[0];
+            candId = first.id || first.candidate_id;
+            if (candId) {
+              localStorage.setItem('talentflow_candidate_id', candId);
+            }
+          }
+        }
+
+        if (!candId) return;
+
+        const res = await api.get(`/candidates/${candId}`);
         const data = res.data?.data;
         if (data) {
           setCandidateData(data);
-          const stage = data.pipeline_stage || 'screening';
+          const stage = data.pipeline_stage || data.pipelineStage || 'screening';
           setCurrentStage(stage);
 
           setTimelineEvents([
@@ -31,7 +45,7 @@ export function ApplicationStatus() {
               id: '1',
               title: 'Application Submitted',
               description: 'Your resume was successfully received & scanned by ATS.',
-              date: data.createdAt || new Date().toISOString(),
+              date: data.created_at || data.createdAt || new Date().toISOString(),
               isComplete: true
             },
             {

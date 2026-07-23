@@ -1,9 +1,6 @@
-"""
-Gaze Direction Estimator.
-Estimates iris ratio relative to eye corner landmarks to detect gaze direction.
-"""
+"""Gaze direction estimation from face landmarks."""
 import numpy as np
-from typing import Dict, Any, Tuple
+from typing import Tuple
 
 # MediaPipe Eye Corner Indices:
 # Left eye: inner 133, outer 33, iris center 468
@@ -17,10 +14,21 @@ RIGHT_EYE_INNER = 362
 RIGHT_EYE_OUTER = 263
 RIGHT_IRIS_CENTER = 473
 
+# Upper/lower eyelid landmarks for down-gaze checks.
+LEFT_EYE_TOP = 159
+LEFT_EYE_BOTTOM = 145
+RIGHT_EYE_TOP = 386
+RIGHT_EYE_BOTTOM = 374
+
 def calculate_gaze_ratio(landmarks: np.ndarray) -> Tuple[float, str]:
     """
-    Calculates horizontal and vertical iris displacement ratio.
-    Returns (gaze_offset_ratio, direction_label).
+    Calculates iris displacement ratio and maps it to an objective gaze state.
+
+    Returns:
+        (gaze_offset_ratio, state)
+
+    State values:
+        center | looking_left | looking_right | looking_down
     """
     if len(landmarks) < 474:
         return 0.0, "center"
@@ -49,15 +57,31 @@ def calculate_gaze_ratio(landmarks: np.ndarray) -> Tuple[float, str]:
     right_dist = np.linalg.norm(right_iris - right_outer)
     ratio_right = right_dist / right_width
 
-    avg_ratio = (ratio_left + ratio_right) / 2.0
+    avg_horizontal_ratio = (ratio_left + ratio_right) / 2.0
+
+    def _vertical_ratio(top_idx: int, bottom_idx: int, iris_idx: int) -> float:
+        eye_top = landmarks[top_idx][:2]
+        eye_bottom = landmarks[bottom_idx][:2]
+        iris = landmarks[iris_idx][:2]
+
+        eye_height = np.linalg.norm(eye_bottom - eye_top)
+        if eye_height == 0:
+            return 0.5
+        return float(np.linalg.norm(iris - eye_top) / eye_height)
+
+    left_vertical = _vertical_ratio(LEFT_EYE_TOP, LEFT_EYE_BOTTOM, LEFT_IRIS_CENTER)
+    right_vertical = _vertical_ratio(RIGHT_EYE_TOP, RIGHT_EYE_BOTTOM, RIGHT_IRIS_CENTER)
+    avg_vertical_ratio = (left_vertical + right_vertical) / 2.0
 
     # Determine gaze direction state
-    if avg_ratio < 0.38:
+    if avg_horizontal_ratio < 0.38:
         direction = "looking_left"
-    elif avg_ratio > 0.62:
+    elif avg_horizontal_ratio > 0.62:
         direction = "looking_right"
+    elif avg_vertical_ratio > 0.70:
+        direction = "looking_down"
     else:
         direction = "center"
 
-    gaze_offset = abs(avg_ratio - 0.5) * 2.0
+    gaze_offset = abs(avg_horizontal_ratio - 0.5) * 2.0
     return round(float(gaze_offset), 2), direction

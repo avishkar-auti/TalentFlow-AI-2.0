@@ -5,7 +5,7 @@ import { Button } from '../components/ui/Button';
 import { Card, CardContent } from '../components/ui/Card';
 import { ResumeUploader } from '../components/resume/ResumeUploader';
 import { FileText, Video, CheckCircle } from 'lucide-react';
-import axios from 'axios';
+import api from '../utils/api';
 
 export function Home() {
   const { isAuthenticated } = useAuth();
@@ -22,7 +22,7 @@ export function Home() {
       formData.append('job_id', 'j1');
 
       // Post to real backend AST Resume Scanner API
-      await axios.post('http://localhost:8000/api/v1/resume/upload', formData, {
+      await api.post('/resume/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
 

@@ -8,12 +8,17 @@ class VisionAnalyzeFrameInput(BaseModel):
     reference_photo: Optional[str] = None # base64
 
 class VisionAnalyzeFrameOutput(BaseModel):
+    timestamp: str
     face_detected: bool
     face_count: int
     gaze_direction: str
+    gaze_state: str
     gaze_offset: float
+    head_pose_state: str
     head_pose: Dict[str, Any]
     ear_value: float
+    identity_match_score: Optional[float] = None
+    landmarks_backend: Optional[str] = None
     flags: List[Dict[str, Any]]
 
 class VisionAnalyzeFrameTool(BaseTool):

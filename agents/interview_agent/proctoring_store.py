@@ -61,11 +61,26 @@ class ProctoringStore:
                 .stream()
             )
             flags = [doc.to_dict() for doc in docs]
+            formatted = [
+                {
+                    "event": f.get("event", "unknown"),
+                    "start": f.get("start_timestamp", f.get("timestamp", "")[:19]),
+                    "duration_s": f.get("duration_seconds", 0),
+                    "duration_seconds": f.get("duration_seconds", 0),
+                    "details": f.get("details", {}),
+                    "timestamp": f.get("timestamp", ""),
+                    "start_timestamp": f.get("start_timestamp", ""),
+                    "start_epoch_seconds": f.get("start_epoch_seconds"),
+                    "end_epoch_seconds": f.get("end_epoch_seconds"),
+                }
+                for f in flags
+            ]
+            merged = self._merge_contiguous_flags(formatted)
             return {
                 "interview_id": self.interview_id,
-                "total_flags": len(flags),
-                "summary": f"{len(flags)} flag(s) detected",
-                "flags": flags,
+                "total_flags": len(merged),
+                "summary": f"{len(merged)} flag(s) detected",
+                "flags": merged,
             }
         except Exception as exc:
             logger.error(f"Failed to fetch proctoring summary for {self.interview_id}: {exc}")
@@ -75,3 +90,30 @@ class ProctoringStore:
                 "summary": "unavailable",
                 "flags": [],
             }
+
+    def _merge_contiguous_flags(self, flags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Merge same-event emissions that represent one continuous condition."""
+        if not flags:
+            return []
+
+        merged: List[Dict[str, Any]] = []
+        for flag in flags:
+            if not merged:
+                merged.append(flag)
+                continue
+
+            prev = merged[-1]
+            same_event = prev.get("event") == flag.get("event")
+            prev_end = prev.get("end_epoch_seconds")
+            curr_start = flag.get("start_epoch_seconds")
+
+            if same_event and isinstance(prev_end, (int, float)) and isinstance(curr_start, (int, float)) and curr_start <= prev_end + 5.0:
+                prev["end_epoch_seconds"] = max(prev_end, flag.get("end_epoch_seconds", prev_end))
+                prev["duration_seconds"] = round(float(prev["end_epoch_seconds"] - prev["start_epoch_seconds"]), 1)
+                prev["duration_s"] = prev["duration_seconds"]
+                prev["details"] = {**prev.get("details", {}), **flag.get("details", {})}
+                prev["timestamp"] = flag.get("timestamp", prev.get("timestamp", ""))
+            else:
+                merged.append(flag)
+
+        return merged

@@ -25,7 +25,13 @@ def estimate_head_pose(landmarks: np.ndarray, image_size: Tuple[int, int]) -> Di
     """
     w, h = image_size
     if len(landmarks) < 300:
-        return {"yaw": 0.0, "pitch": 0.0, "roll": 0.0, "is_turned_away": False}
+        return {
+            "yaw": 0.0,
+            "pitch": 0.0,
+            "roll": 0.0,
+            "is_turned_away": False,
+            "state": "forward",
+        }
 
     image_points = np.array([
         landmarks[idx][:2] for idx in LANDMARK_IDS
@@ -51,7 +57,13 @@ def estimate_head_pose(landmarks: np.ndarray, image_size: Tuple[int, int]) -> Di
     )
 
     if not success:
-        return {"yaw": 0.0, "pitch": 0.0, "roll": 0.0, "is_turned_away": False}
+        return {
+            "yaw": 0.0,
+            "pitch": 0.0,
+            "roll": 0.0,
+            "is_turned_away": False,
+            "state": "forward",
+        }
 
     rmat, _ = cv2.Rodrigues(rvec)
     angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
@@ -67,5 +79,6 @@ def estimate_head_pose(landmarks: np.ndarray, image_size: Tuple[int, int]) -> Di
         "yaw": round(float(yaw), 1),
         "pitch": round(float(pitch), 1),
         "roll": round(float(roll), 1),
-        "is_turned_away": is_turned_away
+        "is_turned_away": is_turned_away,
+        "state": "turned_away" if is_turned_away else "forward",
     }
