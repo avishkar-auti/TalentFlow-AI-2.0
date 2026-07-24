@@ -408,3 +408,14 @@ async def get_background_status(candidate_id: str):
     result = await svc.get_background_status(candidate_id)
     return success_response(result)
 
+
+
+# ── Activity Tracking ────────────────────────────────────────────────────────
+
+@router.get("/activity/recent", response_model=APIResponse)
+async def get_recent_activities(limit: int = 10):
+    """Get recent hiring activities for dashboard"""
+    from backend.services.activity_logger import ActivityLogger
+    activities = await ActivityLogger.get_recent_activities(limit)
+    return success_response(activities, "Recent activities retrieved")
+

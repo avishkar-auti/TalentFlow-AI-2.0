@@ -216,6 +216,14 @@ class CandidateService:
                 current_count = job_data.get('application_count', 0)
                 db.collection('jobs').document(job_id).update({'application_count': current_count + 1})
 
+            # Log activity
+            try:
+                from backend.services.activity_logger import ActivityLogger
+                import asyncio
+                asyncio.create_task(ActivityLogger.log_resume_upload(candidate_id, filename, total_score))
+            except:
+                pass
+
             return {
                 "candidate_id": candidate_id,
                 "status": "completed",

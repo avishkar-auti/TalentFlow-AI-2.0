@@ -317,31 +317,31 @@ export default function Candidates() {
 
             <form onSubmit={handleScheduleSubmit} className="p-8 space-y-6">
               {/* Candidate Info */}
-              <div className="space-y-3">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Candidate</label>
-                <div className="px-4 py-3 bg-slate-700/50 rounded-xl border border-slate-600 text-white font-medium">{activeCandidate.name}</div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-300">Candidate</label>
+                <div className="px-4 py-3 bg-slate-800 rounded-xl border border-slate-600 text-slate-100 font-medium">{activeCandidate.name}</div>
               </div>
 
               {/* Job Role */}
-              <div className="space-y-3">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Job Role</label>
-                <div className="px-4 py-3 bg-slate-700/50 rounded-xl border border-slate-600 text-white font-medium">{activeCandidate.job_id}</div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-300">Job Role</label>
+                <div className="px-4 py-3 bg-slate-800 rounded-xl border border-slate-600 text-slate-100 font-medium">{activeCandidate.job_id}</div>
               </div>
 
               {/* Round Type */}
-              <div className="space-y-3">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Round Type</label>
-                <select value={scheduleType} onChange={e=>setScheduleType(e.target.value)} className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-xl text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition">
-                  <option value="AI Screening" className="bg-slate-800">AI Screening</option>
-                  <option value="HR Round" className="bg-slate-800">HR Round</option>
-                  <option value="Technical Coding" className="bg-slate-800">Technical Coding</option>
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-300">Round Type</label>
+                <select value={scheduleType} onChange={e=>setScheduleType(e.target.value)} className="w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-xl text-slate-100 font-medium focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition cursor-pointer">
+                  <option value="AI Screening" className="bg-slate-800 text-slate-100">AI Screening</option>
+                  <option value="HR Round" className="bg-slate-800 text-slate-100">HR Round</option>
+                  <option value="Technical Coding" className="bg-slate-800 text-slate-100">Technical Coding</option>
                 </select>
               </div>
 
               {/* Date & Time */}
-              <div className="space-y-3">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Date & Time</label>
-                <input required type="datetime-local" value={scheduleTime} onChange={e=>setScheduleTime(e.target.value)} className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600 rounded-xl text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition" />
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-300">Date & Time</label>
+                <input required type="datetime-local" value={scheduleTime} onChange={e=>setScheduleTime(e.target.value)} className="w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-xl text-slate-100 font-medium focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition" />
               </div>
 
               {/* Buttons */}
