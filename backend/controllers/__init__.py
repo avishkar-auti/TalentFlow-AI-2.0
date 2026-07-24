@@ -15,6 +15,7 @@ from .recruiters import router as recruiters_router
 from .admin import router as admin_router
 from .analytics import router as analytics_router
 from .internal import router as internal_router
+from .code_sandbox_controller import router as code_sandbox_router
 
 __all__ = [
     "auth_router",
@@ -33,4 +34,5 @@ __all__ = [
     "admin_router",
     "analytics_router",
     "internal_router",
+    "code_sandbox_router",
 ]

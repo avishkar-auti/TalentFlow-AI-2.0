@@ -52,6 +52,25 @@ async def get_interview(id: str):
     return success_response(interview)
 
 
+@router.post("/{id}/pass", response_model=APIResponse)
+async def pass_interview(id: str, notes: str = ''):
+    svc = InterviewService()
+    result = await svc.pass_interview(id, notes)
+    return success_response(result, 'Interview marked as passed')
+
+@router.post("/{id}/fail", response_model=APIResponse) 
+async def fail_interview(id: str, notes: str = ''):
+    svc = InterviewService()
+    result = await svc.fail_interview(id, notes)
+    return success_response(result, 'Interview marked as failed')
+
+@router.get("/candidate/{candidate_id}/scheduled", response_model=APIResponse)
+async def get_candidate_interviews(candidate_id: str):
+    svc = InterviewService()
+    interviews = await svc.get_candidate_scheduled_interviews(candidate_id)
+    return success_response(interviews)
+
+
 # ── WebSocket: Main Interview Session ─────────────────────────────────────────
 
 @router.websocket("/ws/interview/{interview_id}")
@@ -137,9 +156,14 @@ async def ws_vision_proctoring(websocket: WebSocket, interview_id: str):
 
                 result = await proctoring.analyze_frame(frame_b64, ref_photo)
 
+                flags = result.get("flags", [])
+
                 # Persist any emitted flags to Firestore
-                if result.get("flags"):
-                    await store.store_flags(result["flags"])
+                if flags:
+                    await store.store_flags(flags)
+
+                warning_count = proctoring.flag_tracker.warning_count
+                has_termination_flag = any(f.get("is_terminated") for f in flags) or warning_count >= 5
 
                 await websocket.send_json({
                     "type": "vision_result",
@@ -149,8 +173,32 @@ async def ws_vision_proctoring(websocket: WebSocket, interview_id: str):
                     "gaze_offset": result.get("gaze_offset", 0.0),
                     "head_pose": result.get("head_pose", {}),
                     "ear_value": result.get("ear_value", 0.0),
-                    "flags": result.get("flags", []),
+                    "warning_count": warning_count,
+                    "max_warnings": proctoring.flag_tracker.max_warnings,
+                    "flags": flags,
+                    "is_terminated": has_termination_flag
                 })
+
+                if has_termination_flag:
+                    logger.warning(f"Interview {interview_id} terminated due to 5 proctoring warnings.")
+                    try:
+                        import firebase_admin.firestore
+                        from datetime import datetime, timezone
+                        db = firebase_admin.firestore.client()
+                        db.collection("interviews").document(interview_id).update({
+                            "status": "terminated",
+                            "termination_reason": "Maximum proctoring warnings (5/5) exceeded.",
+                            "ended_at": datetime.now(timezone.utc).isoformat(),
+                        })
+                    except Exception as e:
+                        logger.error(f"Error updating terminated status in Firestore: {e}")
+
+                    await websocket.send_json({
+                        "type": "interview_terminated",
+                        "reason": "Interview automatically terminated. Maximum warning limit (5/5) reached for proctoring violations.",
+                        "warning_count": warning_count
+                    })
+                    break
 
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -169,3 +217,194 @@ async def ws_vision_proctoring(websocket: WebSocket, interview_id: str):
             await websocket.close(code=1011)
         except Exception:
             pass
+
+
+# In-memory connection pool for 1-on-1 chat
+chat_connections: dict = {}  # interview_id -> {recruiter: ws, candidate: ws}
+
+@router.websocket('/ws/recruiter-chat/{interview_id}')
+async def ws_recruiter_chat(websocket: WebSocket, interview_id: str, role: str = 'candidate'):
+    """1-on-1 recruiter <-> candidate chat WebSocket relay."""
+    await websocket.accept()
+    if interview_id not in chat_connections:
+        chat_connections[interview_id] = {}
+    chat_connections[interview_id][role] = websocket
+    
+    try:
+        import firebase_admin.firestore
+        from datetime import datetime, timezone
+        db = firebase_admin.firestore.client()
+        
+        while True:
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+                content = msg.get('content', '')
+                timestamp = datetime.now(timezone.utc).isoformat()
+                
+                # Persist to Firestore
+                db.collection('interviews').document(interview_id).collection('chat').document().set({
+                    'sender_role': role,
+                    'content': content,
+                    'timestamp': timestamp,
+                    'interview_id': interview_id
+                })
+                
+                # Relay to the other party
+                other_role = 'candidate' if role == 'recruiter' else 'recruiter'
+                other_ws = chat_connections.get(interview_id, {}).get(other_role)
+                
+                relay_msg = json.dumps({
+                    'type': 'chat_message',
+                    'sender_role': role,
+                    'content': content,
+                    'timestamp': timestamp
+                })
+                
+                if other_ws:
+                    try:
+                        await other_ws.send_text(relay_msg)
+                    except Exception:
+                        pass
+                        
+                # Echo back to sender as confirmation
+                await websocket.send_text(json.dumps({'type': 'sent', 'timestamp': timestamp}))
+                    
+            except json.JSONDecodeError:
+                pass
+    except WebSocketDisconnect:
+        if interview_id in chat_connections:
+            chat_connections[interview_id].pop(role, None)
+
+
+# ── Code Submission & Scoring ────────────────────────────────────────────────
+
+class CodeSubmissionRequest(BaseModel):
+    interview_id: str
+    language: str
+    code: str
+    expected_output: str = ""
+
+@router.post("/code-submission", response_model=APIResponse)
+async def submit_code(req: CodeSubmissionRequest):
+    """Score submitted code from technical interview."""
+    from backend.services.interview_manager import InterviewManager
+    manager = InterviewManager()
+
+    score_data = await manager.score_code_submission(req.code, req.language, req.expected_output)
+
+    import firebase_admin.firestore
+    db = firebase_admin.firestore.client()
+    db.collection('interviews').document(req.interview_id).update({
+        'code_submission': {
+            'language': req.language,
+            'code': req.code,
+            'score': score_data['code_quality_score'],
+            'submitted_at': datetime.now(timezone.utc).isoformat()
+        }
+    })
+
+    return success_response(score_data, "Code scored successfully")
+
+
+# ── Interview Summary ────────────────────────────────────────────────────────
+
+@router.get("/{interview_id}/summary", response_model=APIResponse)
+async def get_interview_summary(interview_id: str):
+    """Get complete interview summary with chat history and proctoring flags."""
+    from backend.services.interview_manager import InterviewManager
+    manager = InterviewManager()
+
+    summary = await manager.get_interview_summary(interview_id)
+    if not summary.get('interview'):
+        raise HTTPException(status_code=404, detail="Interview not found")
+
+    return success_response(summary, "Interview summary retrieved")
+
+
+# ── Proctoring Flag Recording ────────────────────────────────────────────────
+
+class ProctoringFlagRequest(BaseModel):
+    interview_id: str
+    flag_type: str
+    severity: str = "warning"
+
+@router.post("/proctoring-flag", response_model=APIResponse)
+async def record_proctoring_flag(req: ProctoringFlagRequest):
+    """Record proctoring violation. Auto-terminates on 5th warning."""
+    from backend.services.interview_manager import InterviewManager
+    manager = InterviewManager()
+
+    result = await manager.add_proctoring_flag(req.interview_id, req.flag_type, req.severity)
+
+    if result.get('auto_terminated'):
+        return success_response(result, "Interview auto-terminated due to excessive violations", status_code=400)
+
+    return success_response(result, "Proctoring flag recorded")
+
+
+# ── Offer Management ────────────────────────────────────────────────────────
+
+class OfferRequest(BaseModel):
+    candidate_id: str
+    job_id: str
+    salary: str
+    start_date: str
+    notes: str = ""
+
+@router.post("/offer/generate", response_model=APIResponse)
+async def generate_offer(req: OfferRequest):
+    """Generate and send offer letter"""
+    from backend.services.offer_service import OfferService
+    svc = OfferService()
+    result = await svc.generate_offer(req.candidate_id, req.job_id, req.salary, req.start_date, req.notes)
+    return success_response(result, "Offer sent successfully")
+
+@router.get("/offer/{candidate_id}", response_model=APIResponse)
+async def get_offer(candidate_id: str):
+    """Get candidate's offer"""
+    from backend.services.offer_service import OfferService
+    svc = OfferService()
+    offer = await svc.get_offer(candidate_id)
+    if not offer:
+        raise HTTPException(status_code=404, detail="No offer found")
+    return success_response(offer)
+
+@router.post("/offer/{candidate_id}/accept", response_model=APIResponse)
+async def accept_offer(candidate_id: str):
+    """Candidate accepts offer"""
+    from backend.services.offer_service import OfferService
+    svc = OfferService()
+    result = await svc.accept_offer(candidate_id)
+    return success_response(result, "Offer accepted successfully")
+
+@router.post("/offer/{candidate_id}/reject", response_model=APIResponse)
+async def reject_offer(candidate_id: str, reason: str = ""):
+    """Candidate rejects offer"""
+    from backend.services.offer_service import OfferService
+    svc = OfferService()
+    result = await svc.reject_offer(candidate_id, reason)
+    return success_response(result, "Offer rejected")
+
+
+from datetime import timezone
+
+
+# ── Background Verification ────────────────────────────────────────────────
+
+@router.post("/background-check/initiate/{candidate_id}", response_model=APIResponse)
+async def initiate_background_check(candidate_id: str):
+    """Initiate background verification for candidate"""
+    from backend.services.background_check_service import BackgroundCheckService
+    svc = BackgroundCheckService()
+    result = await svc.initiate_background_check(candidate_id)
+    return success_response(result, "Background check initiated")
+
+@router.get("/background-check/{candidate_id}", response_model=APIResponse)
+async def get_background_status(candidate_id: str):
+    """Get background check status"""
+    from backend.services.background_check_service import BackgroundCheckService
+    svc = BackgroundCheckService()
+    result = await svc.get_background_status(candidate_id)
+    return success_response(result)
+

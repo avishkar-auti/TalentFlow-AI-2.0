@@ -55,6 +55,10 @@ class ProctoringService:
                     "event": f.get("event", "unknown"),
                     "start": f.get("start_timestamp", f.get("timestamp", "")[:19]),
                     "duration_s": f.get("duration_seconds", 0),
+                    "duration_seconds": f.get("duration_seconds", 0),
+                    "warning_number": f.get("warning_number", 0),
+                    "user_message": f.get("user_message", ""),
+                    "is_terminated": f.get("is_terminated", False),
                     "details": f.get("details", {}),
                     "timestamp": f.get("timestamp", ""),
                 }
@@ -63,7 +67,7 @@ class ProctoringService:
             return {
                 "interview_id": interview_id,
                 "total_flags": len(flags),
-                "summary": f"{len(flags)} flag(s) detected",
+                "summary": f"{len(flags)} warning flag(s) recorded",
                 "flags": formatted,
             }
         except Exception as exc:

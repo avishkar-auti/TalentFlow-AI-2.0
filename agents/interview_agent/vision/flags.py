@@ -9,12 +9,23 @@ from typing import Dict, Any, List, Optional
 logger = logging.getLogger(__name__)
 
 class ProctoringFlagTracker:
-    """Tracks continuous violations and emits objective proctoring flags."""
+    """Tracks continuous violations and emits objective proctoring flags with 5-warning alert limit."""
 
-    def __init__(self):
+    EVENT_DESCRIPTIONS = {
+        "no_face_detected": "Candidate face not detected. Please remain directly in front of the camera.",
+        "multiple_faces_detected": "Multiple people detected in video stream. The test must be taken alone.",
+        "gaze_away_from_screen": "Eye gaze directed away from the screen for an extended period.",
+        "head_turned_away": "Head turned away from camera view.",
+        "eyes_closed_extended": "Eyes closed for an extended duration.",
+        "identity_mismatch": "Identity verification match score below baseline threshold."
+    }
+
+    def __init__(self, max_warnings: int = 5):
         self.active_events: Dict[str, float] = {}  # event -> start_time
         self.last_flag_time: Dict[str, float] = {}  # event -> last_emitted_time
-        self.debounce_seconds = 5.0
+        self.debounce_seconds = 4.0
+        self.warning_count = 0
+        self.max_warnings = max_warnings
 
     def evaluate_frame_signals(
         self,
@@ -26,13 +37,14 @@ class ProctoringFlagTracker:
     ) -> List[Dict[str, Any]]:
         """
         Evaluates current frame signals and emits objective flags if threshold duration is exceeded.
+        Applies warning counts up to max_warnings (5) and signals auto-termination.
         """
         now = time.time()
         emitted_flags: List[Dict[str, Any]] = []
 
-        # 1. No Face Detected threshold (> 3.0s)
+        # 1. No Face Detected threshold (> 2.5s)
         if face_count == 0:
-            self._track_event("no_face_detected", now, threshold_s=3.0, emitted_flags=emitted_flags, details={"face_count": 0})
+            self._track_event("no_face_detected", now, threshold_s=2.5, emitted_flags=emitted_flags, details={"face_count": 0})
         else:
             self._reset_event("no_face_detected")
 
@@ -48,9 +60,9 @@ class ProctoringFlagTracker:
         else:
             self._reset_event("gaze_away_from_screen")
 
-        # 4. Head Turned Away (> 3.0s)
+        # 4. Head Turned Away (> 2.5s)
         if is_head_turned:
-            self._track_event("head_turned_away", now, threshold_s=3.0, emitted_flags=emitted_flags, details={"head_pose": "turned_away"})
+            self._track_event("head_turned_away", now, threshold_s=2.5, emitted_flags=emitted_flags, details={"head_pose": "turned_away"})
         else:
             self._reset_event("head_turned_away")
 
@@ -77,16 +89,25 @@ class ProctoringFlagTracker:
         last_emitted = self.last_flag_time.get(event_type, 0.0)
 
         if duration >= threshold_s and (now - last_emitted >= self.debounce_seconds):
+            self.warning_count += 1
+            user_msg = self.EVENT_DESCRIPTIONS.get(event_type, "Proctoring rule violation detected.")
+            
+            is_terminated = self.warning_count >= self.max_warnings
+            
             flag = {
                 "event": event_type,
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "start_timestamp": time.strftime("%H:%M:%S", time.gmtime(self.active_events[event_type])),
                 "duration_seconds": round(duration, 1),
                 "details": details,
+                "warning_number": self.warning_count,
+                "max_warnings": self.max_warnings,
+                "user_message": f"Warning {self.warning_count}/{self.max_warnings}: {user_msg}",
+                "is_terminated": is_terminated,
             }
             emitted_flags.append(flag)
             self.last_flag_time[event_type] = now
-            logger.info(f"Proctoring flag emitted: {event_type} (duration: {duration:.1f}s)")
+            logger.warning(f"Proctoring Warning {self.warning_count}/{self.max_warnings}: {event_type} (duration: {duration:.1f}s)")
 
     def _reset_event(self, event_type: str):
         if event_type in self.active_events:

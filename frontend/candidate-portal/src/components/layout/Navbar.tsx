@@ -29,6 +29,9 @@ export function Navbar() {
           </div>
           
           <div className="flex items-center space-x-4">
+            <Link to="/jobs" className="text-sm font-medium text-gray-600 hover:text-primary-600 dark:text-gray-300 dark:hover:text-primary-400">
+              Browse Jobs
+            </Link>
             {isAuthenticated ? (
               <>
                 <Link to="/status" className="text-sm font-medium text-gray-600 hover:text-primary-600 dark:text-gray-300 dark:hover:text-primary-400">

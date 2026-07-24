@@ -5,16 +5,16 @@ export const useSpeechRecognition = () => {
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
   
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
+  const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  const [recognition, setRecognition] = useState<any>(null);
 
   useEffect(() => {
-    if (SpeechRecognition) {
-      const rec = new SpeechRecognition();
+    if (SpeechRecognitionAPI) {
+      const rec = new SpeechRecognitionAPI();
       rec.continuous = true;
       rec.interimResults = true;
       
-      rec.onresult = (event: SpeechRecognitionEvent) => {
+      rec.onresult = (event: any) => {
         let currentTranscript = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcriptPart = event.results[i][0].transcript;
@@ -27,7 +27,7 @@ export const useSpeechRecognition = () => {
         }
       };
       
-      rec.onerror = (event: SpeechRecognitionErrorEvent) => {
+      rec.onerror = (event: any) => {
         setError(event.error);
         setIsListening(false);
       };

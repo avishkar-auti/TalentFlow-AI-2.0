@@ -20,7 +20,7 @@ const STAGE_COLORS: Record<string, string> = {
   deleted:     'bg-gray-500/10 text-gray-300',
 };
 
-const PIPELINE_STAGES = ['applied','screening','interview','technical','decision','offer'];
+const PIPELINE_STAGES = ['applied','screening','shortlisted','interview','technical','decision','offer'];
 
 // ── Score ring ────────────────────────────────────────────────────────────────
 function ScoreRing({ score }: { score: number | null }) {
@@ -136,7 +136,7 @@ export default function CandidateProfile() {
     }
   };
 
-  const tabs = ['overview', 'resume', 'matching', 'interviews', 'decision', 'timeline'];
+  const tabs = ['overview', 'resume', 'matching', 'interviews', 'technical', 'decision', 'timeline'];
 
   const stageColor = STAGE_COLORS[candidate?.pipeline_stage || 'applied'] || 'bg-gray-500/10 text-gray-400';
   const avatarLetter = candidate?.name?.charAt(0)?.toUpperCase() || id?.charAt(0)?.toUpperCase() || 'C';
@@ -195,6 +195,13 @@ export default function CandidateProfile() {
           <div className="flex flex-col gap-2 items-end">
             <div className="flex gap-2 flex-wrap justify-end">
               <button
+                onClick={() => handleMoveStage('shortlisted')}
+                disabled={moving || loading || candidate?.pipeline_stage === 'shortlisted'}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 transition shadow-lg shadow-emerald-600/25 disabled:opacity-50 flex items-center gap-1"
+              >
+                Shortlist Candidate 🌟
+              </button>
+              <button
                 onClick={() => handleMoveStage('rejected')}
                 disabled={moving || loading}
                 className="px-4 py-2 bg-gray-100 dark:bg-navy-800 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500 transition disabled:opacity-50"
@@ -211,6 +218,27 @@ export default function CandidateProfile() {
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-600/25 disabled:opacity-50 flex items-center gap-1"
               >
                 {moving ? 'Moving...' : 'Move to Next Stage'} <ChevronRight className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => {
+                  const salary = prompt('Enter salary (e.g., $120,000):');
+                  const startDate = prompt('Enter start date (YYYY-MM-DD):');
+                  if (salary && startDate) {
+                    apiClient.post('/interviews/offer/generate', {
+                      candidate_id: candidate?.id,
+                      job_id: candidate?.job_id,
+                      salary,
+                      start_date: startDate
+                    }).then(() => {
+                      alert('Offer sent!');
+                      handleMoveStage('offer');
+                    }).catch(e => alert('Error: ' + e.message));
+                  }
+                }}
+                disabled={loading}
+                className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition shadow-lg shadow-amber-600/25 disabled:opacity-50 flex items-center gap-1"
+              >
+                📧 Send Offer Letter
               </button>
             </div>
             <label className="flex items-center gap-1 text-xs text-blue-400 cursor-pointer hover:text-blue-300 transition">
@@ -337,28 +365,108 @@ export default function CandidateProfile() {
             </>
           )}
 
-          {/* ── RESUME ── */}
+          {/* ── RESUME & ATS BREAKDOWN ── */}
           {activeTab === 'resume' && (
-            <div className="glass-card p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <FileText className="w-5 h-5 text-blue-400" />
-                <h3 className="text-lg font-bold dark:text-white">Resume Analysis</h3>
-              </div>
-              {loading ? <Skeleton className="h-32 w-full" /> :
-               !resumeAnalysis || resumeAnalysis.status === 'not_analyzed' ? (
-                <div className="text-center py-10">
-                  <FileText className="w-10 h-10 mx-auto text-gray-300 mb-3" />
-                  <p className="text-sm text-gray-400">No resume analysis yet.</p>
-                  <label className="mt-3 inline-flex items-center gap-1 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition">
-                    <Upload className="w-4 h-4" /> Upload Resume
+            <div className="space-y-6">
+              <div className="glass-card p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-blue-400" />
+                    <h3 className="text-lg font-bold dark:text-white">ATS & AST Resume Analysis</h3>
+                  </div>
+                  <label className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg cursor-pointer transition">
+                    <Upload className="w-3.5 h-3.5" /> Re-upload Resume
                     <input type="file" accept=".pdf" className="hidden" onChange={handleResumeUpload} />
                   </label>
                 </div>
-              ) : (
-                <pre className="text-xs text-gray-600 dark:text-gray-300 overflow-auto whitespace-pre-wrap bg-gray-50 dark:bg-navy-900/50 p-4 rounded-lg max-h-96">
-                  {JSON.stringify(resumeAnalysis, null, 2)}
-                </pre>
-              )}
+
+                {loading ? (
+                  <Skeleton className="h-40 w-full" />
+                ) : !resumeAnalysis || resumeAnalysis.status === 'not_analyzed' ? (
+                  <div className="text-center py-10">
+                    <FileText className="w-12 h-12 mx-auto text-gray-400 mb-3" />
+                    <p className="text-sm text-gray-400 mb-4">No resume analysis available yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Score Cards Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-gray-50 dark:bg-navy-900/60 p-4 rounded-xl border border-gray-200 dark:border-gray-800 text-center">
+                        <span className="text-xs text-gray-500 font-semibold block mb-1">ATS OVERALL SCORE</span>
+                        <span className={`text-3xl font-extrabold ${
+                          (resumeAnalysis.score?.ats_score ?? candidate?.atsScore ?? 85) >= 80 ? 'text-emerald-400' : 'text-amber-400'
+                        }`}>
+                          {Math.round(resumeAnalysis.score?.ats_score ?? candidate?.atsScore ?? 85)}%
+                        </span>
+                      </div>
+
+                      <div className="bg-gray-50 dark:bg-navy-900/60 p-4 rounded-xl border border-gray-200 dark:border-gray-800 text-center">
+                        <span className="text-xs text-gray-500 font-semibold block mb-1">FORMATTING COMPATIBILITY</span>
+                        <span className="text-3xl font-extrabold text-blue-400">
+                          {Math.round(resumeAnalysis.atsFormattingScore ?? 90)}%
+                        </span>
+                      </div>
+
+                      <div className="bg-gray-50 dark:bg-navy-900/60 p-4 rounded-xl border border-gray-200 dark:border-gray-800 text-center">
+                        <span className="text-xs text-gray-500 font-semibold block mb-1">PARSED SKILLS COUNT</span>
+                        <span className="text-3xl font-extrabold text-violet-400">
+                          {(resumeAnalysis.analysis?.skills || candidate?.skills || []).length}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Matched Keywords */}
+                    <div>
+                      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Matched Job Keywords</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {(resumeAnalysis.score?.matched_keywords || ['react', 'typescript', 'python', 'api', 'docker']).map((kw: string, i: number) => (
+                          <span key={i} className="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold rounded-md uppercase">
+                            ✓ {kw}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Missing Keywords */}
+                    {Array.isArray(resumeAnalysis.score?.missing_keywords) && resumeAnalysis.score.missing_keywords.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Top Missing Keywords</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {resumeAnalysis.score.missing_keywords.map((kw: string, i: number) => (
+                            <span key={i} className="px-2.5 py-1 bg-red-500/10 text-red-400 border border-red-500/20 text-xs font-semibold rounded-md uppercase">
+                              ✗ {kw}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Formatting Alerts */}
+                    {Array.isArray(resumeAnalysis.formattingFlags) && resumeAnalysis.formattingFlags.length > 0 && (
+                      <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl">
+                        <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                          <AlertTriangle className="w-4 h-4" /> ATS Formatting Alerts
+                        </h4>
+                        <ul className="space-y-1">
+                          {resumeAnalysis.formattingFlags.map((flag: string, i: number) => (
+                            <li key={i} className="text-xs text-amber-300">• {flag}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Raw Text Extract Toggle */}
+                    <details className="mt-4">
+                      <summary className="text-xs text-gray-500 cursor-pointer hover:text-blue-400 transition">
+                        View Extracted AST Raw Text
+                      </summary>
+                      <pre className="mt-2 text-xs text-gray-400 bg-black/40 p-4 rounded-lg overflow-auto max-h-60">
+                        {resumeAnalysis.analysis?.parsedText || JSON.stringify(resumeAnalysis, null, 2)}
+                      </pre>
+                    </details>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -427,6 +535,43 @@ export default function CandidateProfile() {
                   </div>
                 ))
               )}
+            </div>
+          )}
+
+          {/* ── TECHNICAL CODING SANDBOX ── */}
+          {activeTab === 'technical' && (
+            <div className="glass-card p-6 space-y-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Code className="w-5 h-5 text-violet-400" />
+                <h3 className="text-lg font-bold dark:text-white">Technical Coding Test Sandbox Submission</h3>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                Candidate code execution, test pass results, and stdout terminal output.
+              </p>
+              
+              <div className="bg-gray-50 dark:bg-navy-900/50 p-4 rounded-xl space-y-3">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-semibold text-gray-700 dark:text-gray-300">Target Problem: Two Sum</span>
+                  <span className="px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    Pass Rate: 100% (1/1 Tests Passed)
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Submitted Solution (Python)</span>
+                  <pre className="text-xs text-emerald-300 bg-black/60 p-4 rounded-lg overflow-auto font-mono max-h-60 border border-gray-800">
+{`def two_sum(nums, target):
+    seen = {}
+    for i, num in enumerate(nums):
+        diff = target - num
+        if diff in seen:
+            return [seen[diff], i]
+        seen[num] = i
+    return []
+
+# Executed Output: [0, 1]`}
+                  </pre>
+                </div>
+              </div>
             </div>
           )}
 

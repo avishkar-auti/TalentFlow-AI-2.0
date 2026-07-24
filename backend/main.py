@@ -13,6 +13,7 @@ if str(ROOT_DIR) not in existing_pythonpath:
 
 import uvicorn
 from backend.config import settings
+from backend.app import app
 
 def main() -> None:
     """Main entrypoint for running the Uvicorn server."""

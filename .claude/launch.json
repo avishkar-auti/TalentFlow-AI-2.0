@@ -1,0 +1,25 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Backend API",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "backend.app:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "Candidate Portal",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--host", "localhost", "--port", "5173"],
+      "port": 5173,
+      "url": "http://localhost:5173"
+    },
+    {
+      "name": "Recruiter Dashboard",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "-w", "frontend/recruiter-dashboard", "--", "--host", "localhost", "--port", "3001"],
+      "port": 3001,
+      "url": "http://localhost:3001"
+    }
+  ]
+}

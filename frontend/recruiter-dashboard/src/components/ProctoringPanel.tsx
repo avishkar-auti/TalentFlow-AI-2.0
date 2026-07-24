@@ -3,6 +3,7 @@ import {
   ShieldCheck, ShieldAlert, Eye, EyeOff, UserX, Users,
   AlertTriangle, Clock, ChevronDown, ChevronUp, RefreshCw
 } from 'lucide-react';
+import { apiClient } from '../utils/api';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -198,12 +199,10 @@ export default function ProctoringPanel({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/v1/candidates/${candidateId}/interview/${interviewId}/proctoring-flags`
+      const res = await apiClient.get(
+        `/candidates/${candidateId}/interview/${interviewId}/proctoring-flags`
       );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setData(json.data ?? json);
+      setData(res.data?.data ?? res.data);
     } catch (err: any) {
       setError(err.message ?? 'Failed to load proctoring data');
     } finally {

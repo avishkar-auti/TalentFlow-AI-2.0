@@ -1,3 +1,11 @@
+import sys
+from pathlib import Path
+
+# Ensure project root is in sys.path so 'backend' package imports resolve correctly
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -9,11 +17,13 @@ from .config import settings
 from .logger import api_logger, request_id_var, errors_logger
 from backend.firebase.firebase import initialize_firebase
 
+
 from .controllers import (
     auth_router, candidates_router, jobs_router, interviews_router,
     dashboard_router, reports_router, resume_router, matching_router,
     decision_router, health_router, applications_router, notifications_router,
     recruiters_router, admin_router, analytics_router, internal_router,
+    code_sandbox_router,
 )
 
 @asynccontextmanager
@@ -33,11 +43,17 @@ def create_app() -> FastAPI:
     )
 
     origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip() and origin.strip() != "*"]
+    default_origins = [
+        "http://localhost:3000", "http://localhost:3001", "http://localhost:5173", "http://localhost:5174",
+        "http://127.0.0.1:3000", "http://127.0.0.1:3001", "http://127.0.0.1:5173", "http://127.0.0.1:5174"
+    ]
+    # Merge configured origins with default local origins
+    all_origins = list(set(origins + default_origins))
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=origins if origins else ["http://localhost:3000", "http://localhost:3001", "http://localhost:5173", "http://localhost:5174"],
-        allow_origin_regex=r"http://localhost:\d+",
+        allow_origins=all_origins,
+        allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -95,12 +111,13 @@ def create_app() -> FastAPI:
     app.include_router(admin_router,        prefix=PREFIX)   # /api/v1/admin/...
     app.include_router(analytics_router,    prefix=PREFIX)   # /api/v1/analytics/...
     app.include_router(internal_router,     prefix=PREFIX)   # /api/v1/internal/...
+    app.include_router(code_sandbox_router, prefix=PREFIX)   # /api/v1/internal/execute-code
 
-    # ── Legacy / sub-controllers ───────────────────────────────────────────────
-    app.include_router(resume_router,       prefix=f"{PREFIX}/resume")
-    app.include_router(matching_router,     prefix=f"{PREFIX}/matching")
-    app.include_router(decision_router,     prefix=f"{PREFIX}/decision")
-    app.include_router(health_router,       prefix=f"{PREFIX}/health")
+    # ── Sub-controllers with self-contained router prefixes ─────────────────
+    app.include_router(resume_router,       prefix=PREFIX)   # /api/v1/resume/...
+    app.include_router(matching_router,     prefix=PREFIX)   # /api/v1/matching/...
+    app.include_router(decision_router,     prefix=PREFIX)   # /api/v1/decision/...
+    app.include_router(health_router,       prefix=PREFIX)   # /api/v1/health
 
     # ── Root WebSocket Aliases (supports client connections to ws://localhost:8000/ws/interview/...) ──
     from .controllers.interviews import ws_interview_session, ws_vision_proctoring
@@ -108,6 +125,9 @@ def create_app() -> FastAPI:
     app.websocket("/ws/interview/{interview_id}/vision")(ws_vision_proctoring)
     app.websocket(f"{PREFIX}/ws/interview/{{interview_id}}")(ws_interview_session)
     app.websocket(f"{PREFIX}/ws/interview/{{interview_id}}/vision")(ws_vision_proctoring)
+    from .controllers.interviews import ws_recruiter_chat
+    app.websocket('/ws/recruiter-chat/{interview_id}')(ws_recruiter_chat)
+    app.websocket(f'{PREFIX}/ws/recruiter-chat/{{interview_id}}')(ws_recruiter_chat)
 
     return app
 

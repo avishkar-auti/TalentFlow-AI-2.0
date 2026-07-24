@@ -3,10 +3,13 @@
 PIPELINE_STAGES = [
     "applied",
     "screening",
+    "shortlisted",
     "recruiter_review",
     "interview_scheduled",
     "interview_completed",
+    "technical",
     "decision",
+    "offer",
     "hired",
     "rejected"
 ]
@@ -14,10 +17,13 @@ PIPELINE_STAGES = [
 STAGE_DISPLAY_NAMES = {
     "applied": "Applied",
     "screening": "AI Screening",
+    "shortlisted": "Shortlisted",
     "recruiter_review": "Recruiter Review",
     "interview_scheduled": "Interview Scheduled",
     "interview_completed": "Interview Completed",
+    "technical": "Technical Round",
     "decision": "Decision Pending",
+    "offer": "Offer Extended",
     "hired": "Hired",
     "rejected": "Rejected"
 }

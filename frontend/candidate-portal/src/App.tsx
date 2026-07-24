@@ -3,8 +3,10 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CandidateLayout } from './components/layout/CandidateLayout';
 import { Home } from './pages/Home';
+import { JobsList } from './pages/JobsList';
 import { ApplicationStatus } from './pages/ApplicationStatus';
 import { InterviewRoom } from './pages/InterviewRoom';
+import { TechnicalSandbox } from './pages/TechnicalSandbox';
 import { Profile } from './pages/Profile';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
@@ -24,6 +26,7 @@ function AppRoutes() {
       
       <Route path="/" element={<CandidateLayout />}>
         <Route index element={<Home />} />
+        <Route path="/jobs" element={<JobsList />} />
         
         <Route path="/status" element={
           <ProtectedRoute>
@@ -34,6 +37,12 @@ function AppRoutes() {
         <Route path="/interview/:id" element={
           <ProtectedRoute>
             <InterviewRoom />
+          </ProtectedRoute>
+        } />
+        
+        <Route path="/technical/:id" element={
+          <ProtectedRoute>
+            <TechnicalSandbox />
           </ProtectedRoute>
         } />
         
