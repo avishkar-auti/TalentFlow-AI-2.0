@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { ConsentScreen } from '../components/interview/ConsentScreen';
 import { VideoPreview } from '../components/interview/VideoPreview';
+import { WebRTCVideoGrid } from '../components/interview/WebRTCVideoGrid';
 import { ChatPanel } from '../components/interview/ChatPanel';
 import { InterviewControls } from '../components/interview/InterviewControls';
 import { InterviewTimer } from '../components/interview/InterviewTimer';
@@ -12,7 +13,7 @@ import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { useAudioNoiseDetector } from '../hooks/useAudioNoiseDetector';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useFaceDetection } from '../hooks/useFaceDetection';
-import { ShieldAlert, Volume2, AlertOctagon, Users, Code, Eye, EyeOff } from 'lucide-react';
+import { ShieldAlert, Volume2, AlertOctagon, Users, Code, Eye, EyeOff, X } from 'lucide-react';
 import type { InterviewMessage } from '../types';
 import { WS_BASE_URL } from '../utils/constants';
 
@@ -27,15 +28,20 @@ export function InterviewRoom() {
   
   const [hasConsented, setHasConsented] = useState(false);
   const [isInterviewActive, setIsInterviewActive] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [isCheckingSchedule, setIsCheckingSchedule] = useState(true);
   const [messages, setMessages] = useState<InterviewMessage[]>([]);
   const [proctoringMsg, setProctoringMsg] = useState<string | null>(null);
   const [warningCount, setWarningCount] = useState<number>(0);
-  const [alertType, setAlertType] = useState<'vision' | 'audio' | 'termination'>('vision');
+  const [alertType, setAlertType] = useState<'vision' | 'audio' | 'termination' | 'peer' | 'info'>('vision');
   const [isTerminated, setIsTerminated] = useState<boolean>(false);
   const [terminationReason, setTerminationReason] = useState<string>('');
   const [lastFlagTime, setLastFlagTime] = useState<number>(0);
   const [liveChatConnected, setLiveChatConnected] = useState<boolean>(false);
   const [remoteConnected, setRemoteConnected] = useState<boolean>(false);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
 
   const { stream, isGranted, error: mediaError, requestPermissions, stopStream } = useMediaDevices();
   const { isListening, transcript, startListening, stopListening, setTranscript } = useSpeechRecognition();
@@ -48,6 +54,7 @@ export function InterviewRoom() {
   const liveChatWsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const iceCandidatesQueueRef = useRef<RTCIceCandidateInit[]>([]);
 
   // Hook up face-api.js detection
   const faceDetection = useFaceDetection(videoRef, isInterviewActive && !isTerminated);
@@ -55,6 +62,47 @@ export function InterviewRoom() {
   // Keep a ref of the latest local media stream so the WebRTC peer connection (created
   // inside a WebSocket callback closure) always attaches the current tracks.
   useEffect(() => { streamRef.current = stream; }, [stream]);
+
+  // Check schedule on mount
+  useEffect(() => {
+    if (!id) return;
+    const checkSchedule = async () => {
+      try {
+        const res = await fetch(`http://localhost:8000/api/v1/interviews/${id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.data) {
+            const status = data.data.status;
+            if (status !== 'scheduled' && status !== 'in_progress') {
+              setScheduleError(`Interview is ${status} and cannot be joined.`);
+            }
+          }
+        } else {
+          // If 404 or unpersisted demo interview ID, allow joining without blocking
+          console.info(`Interview ID ${id} not found on backend. Continuing in demo mode.`);
+        }
+      } catch (err) {
+        console.warn('Failed to check schedule from backend, continuing session:', err);
+      } finally {
+        setIsCheckingSchedule(false);
+      }
+    };
+    checkSchedule();
+  }, [id]);
+
+  // Helper to drain queued ICE candidates after remote description is set
+  const processIceQueue = async (pc: RTCPeerConnection) => {
+    while (iceCandidatesQueueRef.current.length > 0) {
+      const candidate = iceCandidatesQueueRef.current.shift();
+      if (candidate) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch {
+          // ignore late/duplicate candidate error
+        }
+      }
+    }
+  };
 
   // Build a fresh RTCPeerConnection wired to the local camera/mic and to the signaling
   // channel (ICE candidates relayed over the same recruiter-chat WebSocket).
@@ -66,8 +114,11 @@ export function InterviewRoom() {
     }
 
     pc.ontrack = (event) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
+      if (event.streams && event.streams[0]) {
+        setRemoteStream(event.streams[0]);
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        }
       }
       setRemoteConnected(true);
     };
@@ -98,8 +149,10 @@ export function InterviewRoom() {
   const teardownPeerConnection = () => {
     pcRef.current?.close();
     pcRef.current = null;
+    setRemoteStream(null);
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     setRemoteConnected(false);
+    iceCandidatesQueueRef.current = [];
   };
 
   // HR Round = a real human-to-human live meeting. Connect to the recruiter<->candidate
@@ -136,26 +189,38 @@ export function InterviewRoom() {
             timestamp: data.timestamp || new Date().toISOString(),
           }]);
         } else if (data.type === 'peer_joined') {
-          // Other party just connected — recruiter (re)initiates the call now that
-          // someone is actually there to receive the offer.
+          const roleName = data.role === 'recruiter' ? 'Recruiter' : 'Candidate';
+          setAlertType('peer');
+          setProctoringMsg(`${roleName} has joined the meeting room.`);
           if (joinRole === 'recruiter') {
             await createAndSendOffer();
           }
         } else if (data.type === 'peer_left') {
+          const roleName = data.role === 'recruiter' ? 'Recruiter' : 'Candidate';
+          setAlertType('info');
+          setProctoringMsg(`${roleName} left the meeting room.`);
           teardownPeerConnection();
         } else if (data.type === 'webrtc_offer') {
           const pc = pcRef.current || createPeerConnection();
           await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          await processIceQueue(pc);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           ws.send(JSON.stringify({ type: 'webrtc_answer', answer }));
         } else if (data.type === 'webrtc_answer') {
-          await pcRef.current?.setRemoteDescription(new RTCSessionDescription(data.answer));
+          if (pcRef.current) {
+            await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+            await processIceQueue(pcRef.current);
+          }
         } else if (data.type === 'webrtc_ice' && data.candidate) {
-          try {
-            await pcRef.current?.addIceCandidate(new RTCIceCandidate(data.candidate));
-          } catch {
-            // ignore late/duplicate candidates
+          if (pcRef.current && pcRef.current.remoteDescription && pcRef.current.remoteDescription.type) {
+            try {
+              await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+            } catch {
+              // ignore late candidate
+            }
+          } else {
+            iceCandidatesQueueRef.current.push(data.candidate);
           }
         }
       } catch {
@@ -171,7 +236,7 @@ export function InterviewRoom() {
 
   // Video frame extraction loop for real-time OpenCV vision proctoring
   useEffect(() => {
-    if (!isInterviewActive || !isConnected || isTerminated || !stream) return;
+    if (!isInterviewActive || !isConnected || isTerminated || !stream || isVideoOff) return;
 
     const interval = setInterval(() => {
       const videoEl = videoRef.current;
@@ -189,7 +254,7 @@ export function InterviewRoom() {
     }, 1500);
 
     return () => clearInterval(interval);
-  }, [isInterviewActive, isConnected, isTerminated, stream, sendMessage]);
+  }, [isInterviewActive, isConnected, isTerminated, stream, isVideoOff, sendMessage]);
 
   // Handle client-side face-api warnings
   useEffect(() => {
@@ -317,19 +382,25 @@ export function InterviewRoom() {
     setTimeout(() => navigate('/status?terminated=true'), 3000);
   };
 
-  const handleStartInterview = () => {
+  const handleStartInterview = async () => {
+    // Call backend to mark interview in_progress
+    if (id) {
+      try {
+        const res = await fetch(`http://localhost:8000/api/v1/interviews/${id}/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (!res.ok) {
+          console.warn('Failed to start interview on backend');
+        }
+      } catch (e) {
+        console.warn('Failed to call /start endpoint:', e);
+      }
+    }
+
     setHasConsented(true);
     setIsInterviewActive(true);
     
-    // Auto focus the video stream to the ref for face-api
-    setTimeout(() => {
-      const vid = document.querySelector('video');
-      if (vid && videoRef) {
-        // We need to attach the stream to our own ref if not already
-        videoRef.current = vid as any;
-      }
-    }, 500);
-
     setTimeout(() => {
       let welcomeMsg = 'Welcome to your AI hiring interview. Please speak clearly. Proctoring is active.';
       if (interviewMode === 'hr_round') welcomeMsg = 'Welcome to the Live HR Round. Please wait for the recruiter to join or start with automated screening.';
@@ -391,6 +462,34 @@ export function InterviewRoom() {
       startListening();
     }
   };
+
+  if (isCheckingSchedule) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-8rem)]">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+      </div>
+    );
+  }
+
+  if (scheduleError) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-8rem)] p-4">
+        <Card className="max-w-md w-full p-8 text-center bg-white shadow-xl">
+          <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+            <X className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Meeting Unavailable</h2>
+          <p className="text-gray-600 mb-6">{scheduleError}</p>
+          <button
+            onClick={() => navigate('/status')}
+            className="w-full py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+          >
+            Return to Dashboard
+          </button>
+        </Card>
+      </div>
+    );
+  }
 
   if (!hasConsented) {
     return (
@@ -510,20 +609,38 @@ export function InterviewRoom() {
             warningCount={warningCount} 
             maxWarnings={5} 
             alertType={alertType} 
+            onClose={() => setProctoringMsg(null)}
           />
 
           <div className="flex-1 relative h-full">
-            <VideoPreview stream={stream} className="absolute inset-0 rounded-none object-cover" videoRef={videoRef} />
-
-            {interviewMode === 'hr_round' && (
-              <div className="absolute bottom-4 right-4 w-32 h-24 rounded-lg overflow-hidden border-2 border-white/20 shadow-xl bg-black z-10">
-                <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                {!remoteConnected && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-[10px] text-gray-300 text-center px-2">
-                    Waiting for {joinRole === 'recruiter' ? 'candidate' : 'recruiter'}...
-                  </div>
-                )}
-              </div>
+            {interviewMode === 'hr_round' ? (
+              <WebRTCVideoGrid
+                localStream={stream}
+                remoteStream={remoteStream}
+                localVideoRef={videoRef}
+                remoteVideoRef={remoteVideoRef}
+                isMuted={isMuted}
+                isVideoOff={isVideoOff}
+                onToggleMute={() => {
+                  if (stream) {
+                    stream.getAudioTracks().forEach(track => track.enabled = !track.enabled);
+                    setIsMuted(!isMuted);
+                  }
+                }}
+                onToggleVideo={() => {
+                  if (stream) {
+                    stream.getVideoTracks().forEach(track => track.enabled = !track.enabled);
+                    setIsVideoOff(!isVideoOff);
+                  }
+                }}
+                onEndCall={handleEndInterview}
+                connectionState={remoteConnected ? 'connected' : (liveChatConnected ? 'connecting' : 'disconnected')}
+                proctoringMsg={proctoringMsg}
+                alertType={alertType}
+                onClearAlert={() => setProctoringMsg(null)}
+              />
+            ) : (
+              <VideoPreview stream={stream} className="absolute inset-0 rounded-none object-cover" videoRef={videoRef} />
             )}
           </div>
         </Card>

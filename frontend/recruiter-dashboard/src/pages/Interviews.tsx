@@ -65,9 +65,9 @@ export default function Interviews() {
       let intData = intRes?.data?.data || intRes?.data || [];
       if (!intData.length) {
         intData = [
-          { id: 'INT-1', candidate_id: 'C-101', job_id: 'JOB-20260724-ABC123', round_type: 'Technical Coding', status: 'Scheduled', scheduled_time: new Date(Date.now() + 3600000).toISOString(), meet_link: 'http://localhost:5173/interview/INT-1' },
-          { id: 'INT-2', candidate_id: 'C-102', job_id: 'JOB-20260724-ABC123', round_type: 'AI Screening', status: 'Completed', scheduled_time: new Date(Date.now() - 86400000).toISOString(), meet_link: 'http://localhost:5173/interview/INT-2' },
-          { id: 'INT-3', candidate_id: 'C-103', job_id: 'JOB-20260724-XYZ789', round_type: 'HR Round', status: 'In Progress', scheduled_time: new Date().toISOString(), meet_link: 'http://localhost:5173/interview/INT-3' }
+          { id: 'INT-1', candidate_id: 'C-101', job_id: 'JOB-20260724-ABC123', round_type: 'Technical Coding', status: 'Scheduled', scheduled_time: new Date(Date.now() + 3600000).toISOString(), meet_link: 'http://localhost:3001/interview/INT-1' },
+          { id: 'INT-2', candidate_id: 'C-102', job_id: 'JOB-20260724-ABC123', round_type: 'AI Screening', status: 'Completed', scheduled_time: new Date(Date.now() - 86400000).toISOString(), meet_link: 'http://localhost:3001/interview/INT-2' },
+          { id: 'INT-3', candidate_id: 'C-103', job_id: 'JOB-20260724-XYZ789', round_type: 'HR Round', status: 'In Progress', scheduled_time: new Date().toISOString(), meet_link: 'http://localhost:3001/interview/INT-3' }
         ];
       }
       // Normalize real backend records (which use `type` / `scheduled_at`) so the
@@ -164,16 +164,31 @@ export default function Interviews() {
 
     setIsScheduling(true);
     try {
-      // Backend expects `scheduled_at` (ISO string) and `type` (backend enum), not
-      // `scheduled_time` / `round_type` — mismatched field names previously caused
-      // every schedule request to be rejected with a 422 validation error.
-      await apiClient.post('/interviews', {
+      const scheduledAtIso = new Date(newTime).toISOString();
+      const roundTypeEnum = ROUND_LABEL_TO_TYPE[newRoundType] || 'ai_screening';
+
+      const res = await apiClient.post('/interviews', {
         candidate_id: newCandidateId,
         job_id: newJobId,
-        type: ROUND_LABEL_TO_TYPE[newRoundType] || 'ai_screening',
-        scheduled_at: new Date(newTime).toISOString(),
+        type: roundTypeEnum,
+        scheduled_at: scheduledAtIso,
         duration_minutes: newDuration,
       });
+
+      const newIntData = res?.data?.data || res?.data;
+      if (newIntData) {
+        const formattedNewInt = {
+          ...newIntData,
+          candidate_id: newCandidateId,
+          job_id: newJobId,
+          round_type: newRoundType,
+          scheduled_time: scheduledAtIso,
+          status: newIntData.status || 'Scheduled',
+          meet_link: newIntData.meet_link || `http://localhost:3001/interview/${newIntData.id || 'new_int'}`
+        };
+        setInterviews(prev => [formattedNewInt, ...prev]);
+      }
+
       setShowScheduleModal(false);
       resetScheduleForm();
       await fetchAll();
@@ -333,7 +348,7 @@ export default function Interviews() {
                       </button>
                     </div>
                     <a href={`${int.meet_link}${int.meet_link?.includes('?') ? '&' : '?'}mode=${ROUND_LABEL_TO_TYPE[getRoundLabel(int)] || 'ai_screening'}&role=recruiter`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-400 dark:hover:bg-indigo-500/20 rounded-lg text-sm font-semibold transition-colors border border-indigo-100 dark:border-indigo-500/20">
-                      <Video className="w-4 h-4" /> Join Room
+                      <Video className="w-4 h-4" /> Join Realtime Meeting
                     </a>
                   </div>
 

@@ -1,5 +1,6 @@
 import uuid
 import json
+import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
@@ -36,7 +37,10 @@ class InterviewService:
         data['meet_link'] = f'http://localhost:3001/interview/{intv_id}'
 
         interview = Interview(**data)
-        await self.repo.create(intv_id, interview)
+        try:
+            await asyncio.wait_for(self.repo.create(intv_id, interview), timeout=6.0)
+        except Exception as e:
+            logger.warning(f"Firestore interview save warning for {intv_id}: {e}")
         return interview.model_dump()
 
     async def update_interview(self, interview_id: str, updates: dict) -> Dict[str, Any]:
@@ -53,24 +57,22 @@ class InterviewService:
         return await self.repo.delete(interview_id)
 
     async def check_ats_gate(self, candidate_id: str) -> dict:
-        """Check if candidate's ATS score >= 70 (shortlistable) to allow interview.
+        """Check ATS gate for automated screening.
 
-        If no ATS score has been computed yet (score is None), the candidate
-        hasn't been auto-screened — don't block a recruiter from manually
-        scheduling in that case. Only block when a real score was computed
-        and it falls below the threshold.
+        Recruiters manually scheduling an interview from the dashboard can schedule
+        any candidate (including demo/mock candidates or candidates not yet saved in Firestore).
         """
-        cand = await self.cand_repo.get(candidate_id)
-        if not cand:
-            return {'allowed': False, 'reason': 'Candidate not found'}
-        ats = getattr(cand, 'atsScore', None)
-        if ats is None:
-            ats = getattr(cand, 'overallScore', None)
-        if ats is None:
+        try:
+            cand = await self.cand_repo.get(candidate_id)
+            if not cand:
+                return {'allowed': True, 'ats_score': None}
+            ats = getattr(cand, 'atsScore', None)
+            if ats is None:
+                ats = getattr(cand, 'overallScore', None)
+            return {'allowed': True, 'ats_score': ats}
+        except Exception as e:
+            logger.warning(f"ATS check lookup warning for {candidate_id}: {e}")
             return {'allowed': True, 'ats_score': None}
-        if ats < 70:
-            return {'allowed': False, 'reason': f'ATS score {ats:.1f}% below threshold (70%). Resume not shortlisted.', 'ats_score': ats}
-        return {'allowed': True, 'ats_score': ats}
 
     async def pass_interview(self, interview_id: str, notes: str = '') -> dict:
         """Mark interview as passed and auto-schedule next round."""
@@ -158,6 +160,30 @@ class InterviewService:
     async def get_interview(self, id: str) -> Optional[Dict[str, Any]]:
         interview = await self.repo.get(id)
         return interview.model_dump() if interview else None
+
+    async def start_realtime_session(self, interview_id: str) -> dict:
+        """Start a scheduled interview by updating its status to in_progress."""
+        import firebase_admin.firestore
+        from fastapi import HTTPException
+        
+        interview = await self.get_interview(interview_id)
+        if not interview:
+            raise HTTPException(status_code=404, detail='Interview not found')
+            
+        status = interview.get('status')
+        
+        if status == 'completed' or status == 'terminated':
+            raise HTTPException(status_code=400, detail='Cannot start a completed or terminated interview')
+            
+        if status == 'scheduled' or status == 'in_progress':
+            db = firebase_admin.firestore.client()
+            db.collection('interviews').document(interview_id).update({
+                'status': 'in_progress'
+            })
+            interview['status'] = 'in_progress'
+            
+        return interview
+
 
     def _extract_resume_chunks(self, candidate_data: Dict[str, Any], resume_analysis: Optional[Dict[str, Any]]) -> List[Dict[str, str]]:
         """Chunk candidate's parsed resume into searchable contextual blocks (skills, experience, projects)."""

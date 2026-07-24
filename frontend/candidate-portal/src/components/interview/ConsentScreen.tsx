@@ -83,7 +83,7 @@ export function ConsentScreen({ onAccept, stream, onRequestPermissions, isGrante
                       Allow Access
                     </Button>
                     {permissionError && (
-                      <p className="text-xs text-red-500 mt-2">{permissionError}</p>
+                      <p className="text-xs text-amber-500 font-medium mt-2">{permissionError}</p>
                     )}
                   </div>
                 )}
@@ -93,8 +93,11 @@ export function ConsentScreen({ onAccept, stream, onRequestPermissions, isGrante
 
           <div className="flex justify-end pt-4 border-t dark:border-gray-700">
             <Button 
-              onClick={onAccept}
-              disabled={!acceptedTerms || !isGranted}
+              onClick={() => {
+                if (!isGranted) onRequestPermissions();
+                onAccept();
+              }}
+              disabled={!acceptedTerms}
               size="lg"
             >
               I Understand and Accept

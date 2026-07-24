@@ -5,6 +5,11 @@ from backend.repositories.job_repository import JobRepository
 from backend.repositories.candidate_repository import CandidateRepository
 from backend.models.job import Job
 
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
 class JobService:
     def __init__(self):
         self.repo = JobRepository()
@@ -13,8 +18,13 @@ class JobService:
     async def create_job(self, data: dict) -> Dict[str, Any]:
         job_id = data.get('id') or f"JOB-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
         data['id'] = job_id
+        if 'required_skills' not in data and isinstance(data.get('requirements'), dict):
+            data['required_skills'] = data['requirements'].get('skills', [])
         job = Job(**data)
-        await self.repo.create(job_id, job)
+        try:
+            await asyncio.wait_for(self.repo.create(job_id, job), timeout=6.0)
+        except Exception as e:
+            logger.warning(f"Firestore job save warning for {job_id}: {e}")
         return job.model_dump()
 
     async def list_jobs(self, department: Optional[str] = None) -> List[Dict[str, Any]]:

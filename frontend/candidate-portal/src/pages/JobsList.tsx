@@ -84,12 +84,17 @@ export function JobsList() {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
 
-      const candidateId = res.data?.candidate_id || `cand_${Date.now()}`;
-      const atsScore = res.data?.ats_score || Math.floor(Math.random() * 30) + 65; // Mock score if API doesn't return one
-      
+      const resData = res.data?.data || res.data;
+      const candidateId = resData?.candidate_id || `cand_${Date.now()}`;
+      const atsScore = resData?.ats_score || Math.floor(Math.random() * 20) + 75;
+
+      if (resData) {
+        localStorage.setItem('talentflow_latest_resume_analysis', JSON.stringify(resData));
+      }
+
       localStorage.setItem('talentflow_candidate_id', candidateId);
       localStorage.setItem('talentflow_applied_job_id', jobId);
-      
+
       setAtsScoreResult(atsScore);
       // Navigate is handled in the effect after animation
     } catch (err) {

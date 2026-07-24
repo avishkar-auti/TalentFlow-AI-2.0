@@ -17,11 +17,13 @@ router = APIRouter(tags=["Interviews"])
 # ── Request schemas ──────────────────────────────────────────────────────────
 
 class ScheduleInterviewRequest(BaseModel):
-    candidate_id: str
-    job_id: str
-    scheduled_at: str
-    type: str = "speech"
-    duration_minutes: int = 60
+    candidate_id: Optional[str] = None
+    job_id: Optional[str] = None
+    scheduled_at: Optional[str] = None
+    scheduled_time: Optional[str] = None
+    type: Optional[str] = None
+    round_type: Optional[str] = None
+    duration_minutes: int = 45
 
 
 # ── REST Endpoints ────────────────────────────────────────────────────────────
@@ -29,8 +31,28 @@ class ScheduleInterviewRequest(BaseModel):
 @router.post("", response_model=APIResponse)
 async def schedule_interview(req: ScheduleInterviewRequest):
     """Create a new interview slot for a candidate."""
+    data = req.dict()
+    if not data.get("candidate_id") and data.get("candidateId"):
+        data["candidate_id"] = data["candidateId"]
+    if not data.get("job_id") and data.get("jobId"):
+        data["job_id"] = data["jobId"]
+    if not data.get("scheduled_at") and data.get("scheduled_time"):
+        data["scheduled_at"] = data["scheduled_time"]
+    if not data.get("scheduled_at"):
+        data["scheduled_at"] = datetime.utcnow().isoformat()
+    if not data.get("type") and data.get("round_type"):
+        rt = str(data["round_type"]).lower()
+        if "hr" in rt:
+            data["type"] = "hr_round"
+        elif "tech" in rt or "code" in rt:
+            data["type"] = "technical_coding"
+        else:
+            data["type"] = "ai_screening"
+    if not data.get("type"):
+        data["type"] = "ai_screening"
+
     svc = InterviewService()
-    interview = await svc.schedule(req.dict())
+    interview = await svc.schedule(data)
     return success_response(interview, "Interview scheduled")
 
 
@@ -269,6 +291,7 @@ async def ws_recruiter_chat(websocket: WebSocket, interview_id: str, role: str =
     if other_ws:
         try:
             await other_ws.send_text(json.dumps({'type': 'peer_joined', 'role': role}))
+            await websocket.send_text(json.dumps({'type': 'peer_joined', 'role': other_role}))
         except Exception:
             pass
 

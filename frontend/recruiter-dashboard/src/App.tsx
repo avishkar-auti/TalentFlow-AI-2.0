@@ -13,6 +13,23 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import { AuthProvider } from './context/AuthContext';
 
+import { useParams, useLocation } from 'react-router-dom';
+
+function InterviewRedirect() {
+  const { id } = useParams();
+  const location = useLocation();
+  React.useEffect(() => {
+    window.location.href = `http://localhost:3001/interview/${id}${location.search}`;
+  }, [id, location]);
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-slate-900 text-white">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mr-4"></div>
+      <p className="font-medium text-lg">Redirecting to Live Meeting Room...</p>
+    </div>
+  );
+}
+
 function App() {
   return (
     <AuthProvider>
@@ -20,6 +37,7 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/interview/:id" element={<InterviewRedirect />} />
           
           <Route path="/" element={<MainLayout />}>
             <Route index element={<Navigate to="/dashboard" replace />} />

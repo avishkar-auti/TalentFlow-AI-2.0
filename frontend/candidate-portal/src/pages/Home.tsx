@@ -46,9 +46,14 @@ export function Home() {
       formData.append('job_id', chosenJobId);
 
       // Post to real backend AST Resume Scanner API
-      await axios.post('http://localhost:8000/api/v1/resume/upload', formData, {
+      const uploadRes = await axios.post('http://localhost:8000/api/v1/resume/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
+
+      const analysisData = uploadRes?.data?.data || uploadRes?.data;
+      if (analysisData) {
+        localStorage.setItem('talentflow_latest_resume_analysis', JSON.stringify(analysisData));
+      }
 
       // Save candidateId and target jobId to localStorage for tracking status
       localStorage.setItem('talentflow_candidate_id', candidateId);
