@@ -2,6 +2,7 @@
 Resume Agent Orchestrator.
 Orchestrates layout extraction (AST), structure parsing (LLM/rule), ATS scoring, and Firestore/Storage persistence.
 """
+import asyncio
 import os
 import json
 import logging
@@ -92,22 +93,30 @@ class ResumeAgent:
 
         result = ResumeAnalysisResult(analysis=analysis, score=score)
 
-        # 5. Persist resume file to Firebase Storage & Document to Firestore
-        storage_url = await save_resume_file_to_storage(candidate_id, file_bytes, filename)
-        
+        # 5. Persist resume file to Firebase Storage & Document to Firestore.
+        # Neither write is needed to return the computed score to the caller, so both run
+        # in the background — a slow/quota-limited Firestore or Storage no longer adds
+        # its latency to every resume upload request.
         full_persist_data = result.model_dump()
-        full_persist_data["resumeUrl"] = storage_url
         full_persist_data["atsFormattingScore"] = ats_results["ats_formatting_score"]
         full_persist_data["formattingFlags"] = ats_results["formatting_flags"]
 
-        await save_analysis(candidate_id, full_persist_data)
+        async def _persist():
+            try:
+                storage_url = await save_resume_file_to_storage(candidate_id, file_bytes, filename)
+                full_persist_data["resumeUrl"] = storage_url
+                await save_analysis(candidate_id, full_persist_data)
+            except Exception as e:
+                logger.warning(f"Background persistence failed for candidate {candidate_id}: {e}")
+
+        asyncio.create_task(_persist())
 
         # Cache results locally for instant lookup
         try:
             cache_dir = Path(f"backend/temp/candidate_{candidate_id}/resume_agent")
             cache_dir.mkdir(parents=True, exist_ok=True)
             with open(cache_dir / "analysis.json", "w", encoding="utf-8") as f:
-                json.dump(full_persist_data, f, indent=2)
+                json.dump(full_persist_data, f, indent=2, default=str)
         except Exception as e:
             logger.warning(f"Could not cache results locally: {e}")
 

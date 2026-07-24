@@ -32,11 +32,13 @@ async def save_matching_result(candidate_id: str, matching_data: Dict[str, Any])
             data=matching_data,
             merge=True
         )
-        # Update top-level candidate match score
-        await firestore.set_document("candidates", candidate_id, {
-            "overallMatch": matching_data.get("overallMatch", 85.0),
-            "matchingComplete": True
-        }, merge=True)
+        # Update top-level candidate match score — only if a real score was computed,
+        # never fabricate a fallback that would overwrite an existing real score.
+        overall_match = matching_data.get("overallMatch")
+        update_payload: Dict[str, Any] = {"matchingComplete": True}
+        if overall_match is not None:
+            update_payload["overallMatch"] = overall_match
+        await firestore.set_document("candidates", candidate_id, update_payload, merge=True)
         logger.info(f"Saved matching result for candidate {candidate_id} to Firestore.")
     except Exception as e:
         logger.error(f"Failed to save matching result for candidate {candidate_id}: {e}")

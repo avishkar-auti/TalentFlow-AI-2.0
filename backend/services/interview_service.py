@@ -33,18 +33,41 @@ class InterviewService:
         intv_type = data.get('type', 'ai_screening')
         data['interview_round'] = intv_type
         data['round_number'] = {'ai_screening': 1, 'hr_round': 2, 'technical_coding': 3}.get(intv_type, 1)
-        data['meet_link'] = f'http://localhost:5173/interview/{intv_id}'
+        data['meet_link'] = f'http://localhost:3001/interview/{intv_id}'
 
         interview = Interview(**data)
         await self.repo.create(intv_id, interview)
         return interview.model_dump()
 
+    async def update_interview(self, interview_id: str, updates: dict) -> Dict[str, Any]:
+        """Partially update an existing interview (edit/reschedule)."""
+        # Keep interview_round/round_number in sync if the round `type` changes.
+        if 'type' in updates:
+            updates['interview_round'] = updates['type']
+            updates['round_number'] = {'ai_screening': 1, 'hr_round': 2, 'technical_coding': 3}.get(updates['type'], 1)
+        updated = await self.repo.update(interview_id, updates)
+        return updated.model_dump()
+
+    async def delete_interview(self, interview_id: str) -> bool:
+        """Cancel/remove a scheduled interview."""
+        return await self.repo.delete(interview_id)
+
     async def check_ats_gate(self, candidate_id: str) -> dict:
-        """Check if candidate's ATS score >= 70 (shortlistable) to allow interview."""
+        """Check if candidate's ATS score >= 70 (shortlistable) to allow interview.
+
+        If no ATS score has been computed yet (score is None), the candidate
+        hasn't been auto-screened — don't block a recruiter from manually
+        scheduling in that case. Only block when a real score was computed
+        and it falls below the threshold.
+        """
         cand = await self.cand_repo.get(candidate_id)
         if not cand:
             return {'allowed': False, 'reason': 'Candidate not found'}
-        ats = getattr(cand, 'atsScore', None) or getattr(cand, 'overallScore', None) or 0
+        ats = getattr(cand, 'atsScore', None)
+        if ats is None:
+            ats = getattr(cand, 'overallScore', None)
+        if ats is None:
+            return {'allowed': True, 'ats_score': None}
         if ats < 70:
             return {'allowed': False, 'reason': f'ATS score {ats:.1f}% below threshold (70%). Resume not shortlisted.', 'ats_score': ats}
         return {'allowed': True, 'ats_score': ats}
@@ -88,7 +111,7 @@ class InterviewService:
                 'status': 'scheduled',
                 'scheduled_at': None,  # recruiter to confirm
                 'duration_minutes': 60,
-                'meet_link': f'http://localhost:5173/interview/{next_intv_id}',
+                'meet_link': f'http://localhost:3001/interview/{next_intv_id}',
                 'created_at': datetime.now(timezone.utc).isoformat()
             }
             db.collection('interviews').document(next_intv_id).set(next_intv_data)

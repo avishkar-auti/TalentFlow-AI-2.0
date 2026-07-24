@@ -1,8 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Video, Clock, CheckCircle2, XCircle, Search, RefreshCw, Copy, ExternalLink, MessageSquare, Plus, Users, Briefcase, X, Send } from 'lucide-react';
+import { Calendar, Video, Clock, CheckCircle2, XCircle, Search, RefreshCw, Copy, ExternalLink, MessageSquare, Plus, Users, Briefcase, X, Send, AlertCircle, Loader2, Pencil, Trash2 } from 'lucide-react';
 import { apiClient } from '../utils/api';
 
 const ROUNDS = ['All', 'AI Screening', 'HR Round', 'Technical Coding'];
+
+// Map UI-friendly round labels <-> backend `type` values expected by the Interview model.
+const ROUND_LABEL_TO_TYPE: Record<string, string> = {
+  'AI Screening': 'ai_screening',
+  'HR Round': 'hr_round',
+  'Technical Coding': 'technical_coding',
+};
+const ROUND_TYPE_TO_LABEL: Record<string, string> = {
+  ai_screening: 'AI Screening',
+  hr_round: 'HR Round',
+  technical_coding: 'Technical Coding',
+};
+const getRoundLabel = (interview: any) =>
+  ROUND_TYPE_TO_LABEL[interview.type || interview.interview_round] || interview.round_type || interview.type || 'AI Screening';
 
 export default function Interviews() {
   const [interviews, setInterviews] = useState<any[]>([]);
@@ -22,6 +36,17 @@ export default function Interviews() {
   const [newJobId, setNewJobId] = useState('');
   const [newRoundType, setNewRoundType] = useState('AI Screening');
   const [newTime, setNewTime] = useState('');
+  const [newDuration, setNewDuration] = useState(45);
+  const [scheduleError, setScheduleError] = useState('');
+  const [isScheduling, setIsScheduling] = useState(false);
+
+  // Edit Modal
+  const [editingInterview, setEditingInterview] = useState<any>(null);
+  const [editRoundType, setEditRoundType] = useState('AI Screening');
+  const [editTime, setEditTime] = useState('');
+  const [editError, setEditError] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Chat
   const [chatMessages, setChatMessages] = useState<any[]>([]);
@@ -45,6 +70,14 @@ export default function Interviews() {
           { id: 'INT-3', candidate_id: 'C-103', job_id: 'JOB-20260724-XYZ789', round_type: 'HR Round', status: 'In Progress', scheduled_time: new Date().toISOString(), meet_link: 'http://localhost:5173/interview/INT-3' }
         ];
       }
+      // Normalize real backend records (which use `type` / `scheduled_at`) so the
+      // existing UI — built around `round_type` / `scheduled_time` — keeps working
+      // unchanged, without needing to touch every render line below.
+      intData = intData.map((int: any) => ({
+        ...int,
+        round_type: int.round_type || getRoundLabel(int),
+        scheduled_time: int.scheduled_time || int.scheduled_at,
+      }));
       setInterviews(intData);
 
       let candList = candRes?.data?.data || candRes?.data || [
@@ -75,8 +108,16 @@ export default function Interviews() {
     if (showChatPanel) {
       wsRef.current = new WebSocket(`ws://localhost:8000/ws/recruiter-chat/${showChatPanel}?role=recruiter`);
       wsRef.current.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        setChatMessages(prev => [...prev, data]);
+        try {
+          const data = JSON.parse(event.data);
+          // Server relays live messages as {type:'chat_message', sender_role, content, timestamp}
+          // and confirms our own sends as {type:'sent', timestamp} — only render actual messages.
+          if (data.type === 'chat_message') {
+            setChatMessages(prev => [...prev, { content: data.content, sender_role: data.sender_role, timestamp: data.timestamp }]);
+          }
+        } catch {
+          // ignore malformed frames
+        }
       };
       return () => {
         if (wsRef.current) wsRef.current.close();
@@ -87,9 +128,9 @@ export default function Interviews() {
   const sendChatMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (chatInput.trim() && wsRef.current) {
-      const msg = { text: chatInput, sender: 'recruiter', timestamp: new Date().toISOString() };
-      wsRef.current.send(JSON.stringify(msg));
-      setChatMessages(prev => [...prev, msg]);
+      // Backend recruiter-chat relay expects a `content` field.
+      wsRef.current.send(JSON.stringify({ content: chatInput }));
+      setChatMessages(prev => [...prev, { content: chatInput, sender_role: 'recruiter', timestamp: new Date().toISOString() }]);
       setChatInput('');
     }
   };
@@ -103,20 +144,45 @@ export default function Interviews() {
     }
   };
 
+  const resetScheduleForm = () => {
+    setNewCandidateId('');
+    setNewJobId('');
+    setNewRoundType('AI Screening');
+    setNewTime('');
+    setNewDuration(45);
+    setScheduleError('');
+  };
+
   const handleScheduleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setScheduleError('');
+
+    if (!newCandidateId || !newJobId || !newTime) {
+      setScheduleError('Please fill in candidate, job role and date/time.');
+      return;
+    }
+
+    setIsScheduling(true);
     try {
+      // Backend expects `scheduled_at` (ISO string) and `type` (backend enum), not
+      // `scheduled_time` / `round_type` — mismatched field names previously caused
+      // every schedule request to be rejected with a 422 validation error.
       await apiClient.post('/interviews', {
         candidate_id: newCandidateId,
         job_id: newJobId,
-        round_type: newRoundType,
-        scheduled_time: newTime,
-        status: 'Scheduled'
+        type: ROUND_LABEL_TO_TYPE[newRoundType] || 'ai_screening',
+        scheduled_at: new Date(newTime).toISOString(),
+        duration_minutes: newDuration,
       });
       setShowScheduleModal(false);
-      fetchAll();
-    } catch (err) {
+      resetScheduleForm();
+      await fetchAll();
+    } catch (err: any) {
       console.error(err);
+      const message = err?.response?.data?.detail || err?.response?.data?.message || 'Failed to schedule interview. Please try again.';
+      setScheduleError(message);
+    } finally {
+      setIsScheduling(false);
     }
   };
 
@@ -124,6 +190,63 @@ export default function Interviews() {
     navigator.clipboard.writeText(link);
     setCopiedLink(link);
     setTimeout(() => setCopiedLink(''), 2000);
+  };
+
+  // Convert an ISO timestamp into the `datetime-local` input format (YYYY-MM-DDTHH:mm) for prefill.
+  const toDatetimeLocal = (isoString: string) => {
+    if (!isoString) return '';
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const openEditModal = (interview: any) => {
+    setEditingInterview(interview);
+    setEditRoundType(getRoundLabel(interview));
+    setEditTime(toDatetimeLocal(interview.scheduled_time));
+    setEditError('');
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingInterview) return;
+    setEditError('');
+
+    if (!editTime) {
+      setEditError('Please choose a date/time.');
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      await apiClient.put(`/interviews/${editingInterview.id}`, {
+        type: ROUND_LABEL_TO_TYPE[editRoundType] || 'ai_screening',
+        scheduled_at: new Date(editTime).toISOString(),
+      });
+      setEditingInterview(null);
+      await fetchAll();
+    } catch (err: any) {
+      console.error(err);
+      const message = err?.response?.data?.detail || err?.response?.data?.message || 'Failed to update interview. Please try again.';
+      setEditError(message);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Cancel and remove this scheduled interview? This cannot be undone.')) return;
+    setDeletingId(id);
+    try {
+      await apiClient.delete(`/interviews/${id}`);
+      await fetchAll();
+    } catch (err) {
+      console.error(err);
+      window.alert('Failed to remove the interview. Please try again.');
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const getCandidateName = (id: string) => candidates.find(c => c.id === id)?.name || id;
@@ -209,7 +332,7 @@ export default function Interviews() {
                         {copiedLink === int.meet_link ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
                       </button>
                     </div>
-                    <a href={int.meet_link} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-400 dark:hover:bg-indigo-500/20 rounded-lg text-sm font-semibold transition-colors border border-indigo-100 dark:border-indigo-500/20">
+                    <a href={`${int.meet_link}${int.meet_link?.includes('?') ? '&' : '?'}mode=${ROUND_LABEL_TO_TYPE[getRoundLabel(int)] || 'ai_screening'}&role=recruiter`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-400 dark:hover:bg-indigo-500/20 rounded-lg text-sm font-semibold transition-colors border border-indigo-100 dark:border-indigo-500/20">
                       <Video className="w-4 h-4" /> Join Room
                     </a>
                   </div>
@@ -220,6 +343,16 @@ export default function Interviews() {
                         <MessageSquare className="w-4 h-4" /> Chat
                       </button>
                     )}
+
+                    {int.status !== 'Completed' && (
+                      <button onClick={() => openEditModal(int)} className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-navy-900 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-navy-800 rounded-lg text-sm font-semibold transition-colors" title="Edit / Reschedule">
+                        <Pencil className="w-4 h-4" /> Edit
+                      </button>
+                    )}
+
+                    <button onClick={() => handleDelete(int.id)} disabled={deletingId === int.id} className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-navy-900 text-rose-600 dark:text-rose-400 border border-gray-200 dark:border-gray-700 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50" title="Remove Meeting">
+                      {deletingId === int.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} Remove
+                    </button>
 
                     {(int.status === 'Completed' || int.status === 'In Progress') && (
                       <>
@@ -260,10 +393,10 @@ export default function Interviews() {
               <p className="text-center text-xs text-gray-400 mt-10">No messages yet.</p>
             ) : (
               chatMessages.map((m, i) => (
-                <div key={i} className={`flex flex-col ${m.sender === 'recruiter' ? 'items-end' : 'items-start'}`}>
-                  <span className="text-[10px] text-gray-400 mb-1 px-1">{m.sender === 'recruiter' ? 'You' : 'Candidate'}</span>
-                  <div className={`px-3 py-2 rounded-2xl max-w-[85%] text-sm ${m.sender === 'recruiter' ? 'bg-indigo-600 text-white rounded-tr-sm' : 'bg-white dark:bg-navy-800 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-tl-sm'}`}>
-                    {m.text}
+                <div key={i} className={`flex flex-col ${m.sender_role === 'recruiter' ? 'items-end' : 'items-start'}`}>
+                  <span className="text-[10px] text-gray-400 mb-1 px-1">{m.sender_role === 'recruiter' ? 'You' : 'Candidate'}</span>
+                  <div className={`px-3 py-2 rounded-2xl max-w-[85%] text-sm ${m.sender_role === 'recruiter' ? 'bg-indigo-600 text-white rounded-tr-sm' : 'bg-white dark:bg-navy-800 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-tl-sm'}`}>
+                    {m.content}
                   </div>
                 </div>
               ))
@@ -291,13 +424,19 @@ export default function Interviews() {
             </div>
             
             <form onSubmit={handleScheduleSubmit} className="p-6 space-y-5">
+              {scheduleError && (
+                <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-700 dark:text-rose-400 text-sm">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>{scheduleError}</span>
+                </div>
+              )}
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Candidate</label>
                 <div className="relative">
                   <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <select required value={newCandidateId} onChange={e=>setNewCandidateId(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none appearance-none cursor-pointer">
-                    <option value="">Select Candidate...</option>
-                    {candidates.map(c => <option key={c.id} value={c.id}>{c.name} ({c.email})</option>)}
+                  <select required value={newCandidateId} onChange={e=>setNewCandidateId(e.target.value)} style={{ colorScheme: 'light', backgroundColor: '#fff', color: '#111827' }} className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm focus:ring-2 focus:ring-indigo-500 outline-none appearance-none cursor-pointer">
+                    <option value="" style={{ backgroundColor: '#fff', color: '#111827' }}>Select Candidate...</option>
+                    {candidates.map(c => <option key={c.id} value={c.id} style={{ backgroundColor: '#fff', color: '#111827' }}>{c.name} ({c.email})</option>)}
                   </select>
                 </div>
               </div>
@@ -306,9 +445,9 @@ export default function Interviews() {
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Job Role</label>
                 <div className="relative">
                   <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <select required value={newJobId} onChange={e=>setNewJobId(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none appearance-none cursor-pointer">
-                    <option value="">Select Job...</option>
-                    {jobs.map(j => <option key={j.id||j.job_id} value={j.id||j.job_id}>{j.title}</option>)}
+                  <select required value={newJobId} onChange={e=>setNewJobId(e.target.value)} style={{ colorScheme: 'light', backgroundColor: '#fff', color: '#111827' }} className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm focus:ring-2 focus:ring-indigo-500 outline-none appearance-none cursor-pointer">
+                    <option value="" style={{ backgroundColor: '#fff', color: '#111827' }}>Select Job...</option>
+                    {jobs.map(j => <option key={j.id||j.job_id} value={j.id||j.job_id} style={{ backgroundColor: '#fff', color: '#111827' }}>{j.title}</option>)}
                   </select>
                 </div>
               </div>
@@ -316,8 +455,8 @@ export default function Interviews() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Round Type</label>
-                  <select required value={newRoundType} onChange={e=>setNewRoundType(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none appearance-none cursor-pointer">
-                    {ROUNDS.filter(r=>r!=='All').map(r => <option key={r} value={r}>{r}</option>)}
+                  <select required value={newRoundType} onChange={e=>setNewRoundType(e.target.value)} style={{ colorScheme: 'light', backgroundColor: '#fff', color: '#111827' }} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm focus:ring-2 focus:ring-indigo-500 outline-none appearance-none cursor-pointer">
+                    {ROUNDS.filter(r=>r!=='All').map(r => <option key={r} value={r} style={{ backgroundColor: '#fff', color: '#111827' }}>{r}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -327,8 +466,55 @@ export default function Interviews() {
               </div>
 
               <div className="pt-4 flex justify-end gap-3 border-t border-gray-100 dark:border-gray-800">
-                <button type="button" onClick={() => setShowScheduleModal(false)} className="px-5 py-2.5 text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-navy-800 rounded-xl transition-colors">Cancel</button>
-                <button type="submit" className="px-6 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-lg shadow-indigo-500/25 transition-all">Schedule</button>
+                <button type="button" onClick={() => { setShowScheduleModal(false); setScheduleError(''); }} className="px-5 py-2.5 text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-navy-800 rounded-xl transition-colors">Cancel</button>
+                <button type="submit" disabled={isScheduling} className="px-6 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed rounded-xl shadow-lg shadow-indigo-500/25 transition-all flex items-center gap-2">
+                  {isScheduling && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {isScheduling ? 'Scheduling...' : 'Schedule'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit / Reschedule Modal */}
+      {editingInterview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-navy-900 rounded-3xl w-full max-w-md shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-fade-in">
+            <div className="px-6 py-5 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gray-50/50 dark:bg-navy-800/50">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Edit Interview</h3>
+                <p className="text-xs text-gray-500">{getCandidateName(editingInterview.candidate_id)} &middot; {getJobTitle(editingInterview.job_id)}</p>
+              </div>
+              <button onClick={() => setEditingInterview(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-navy-800 rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"><X className="w-5 h-5" /></button>
+            </div>
+
+            <form onSubmit={handleEditSubmit} className="p-6 space-y-5">
+              {editError && (
+                <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-700 dark:text-rose-400 text-sm">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>{editError}</span>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Round Type</label>
+                <select required value={editRoundType} onChange={e=>setEditRoundType(e.target.value)} style={{ colorScheme: 'light', backgroundColor: '#fff', color: '#111827' }} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm focus:ring-2 focus:ring-indigo-500 outline-none appearance-none cursor-pointer">
+                  {ROUNDS.filter(r=>r!=='All').map(r => <option key={r} value={r} style={{ backgroundColor: '#fff', color: '#111827' }}>{r}</option>)}
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Date & Time</label>
+                <input required type="datetime-local" value={editTime} onChange={e=>setEditTime(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+              </div>
+
+              <div className="pt-4 flex justify-end gap-3 border-t border-gray-100 dark:border-gray-800">
+                <button type="button" onClick={() => setEditingInterview(null)} className="px-5 py-2.5 text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-navy-800 rounded-xl transition-colors">Cancel</button>
+                <button type="submit" disabled={isSavingEdit} className="px-6 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed rounded-xl shadow-lg shadow-indigo-500/25 transition-all flex items-center gap-2">
+                  {isSavingEdit && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {isSavingEdit ? 'Saving...' : 'Save Changes'}
+                </button>
               </div>
             </form>
           </div>

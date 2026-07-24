@@ -14,3 +14,14 @@
 html, body, #root {
   height: 100%;
 }
+
+/* Without this, native form controls (select dropdown popups, scrollbars) render using
+   the OS's light/dark preference instead of this app's own .dark theme — causing
+   authored light-mode text colors to land on a dark native popup (or vice versa)
+   and become unreadable. */
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}

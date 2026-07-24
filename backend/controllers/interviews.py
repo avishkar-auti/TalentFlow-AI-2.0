@@ -52,6 +52,39 @@ async def get_interview(id: str):
     return success_response(interview)
 
 
+class UpdateInterviewRequest(BaseModel):
+    candidate_id: Optional[str] = None
+    job_id: Optional[str] = None
+    scheduled_at: Optional[str] = None
+    type: Optional[str] = None
+    duration_minutes: Optional[int] = None
+
+
+@router.put("/{id}", response_model=APIResponse)
+async def update_interview(id: str, req: UpdateInterviewRequest):
+    """Edit/reschedule an existing interview (partial update)."""
+    svc = InterviewService()
+    existing = await svc.get_interview(id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Interview not found")
+    updates = {k: v for k, v in req.dict().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields provided to update")
+    result = await svc.update_interview(id, updates)
+    return success_response(result, "Interview updated")
+
+
+@router.delete("/{id}", response_model=APIResponse)
+async def delete_interview(id: str):
+    """Cancel/remove a scheduled interview."""
+    svc = InterviewService()
+    existing = await svc.get_interview(id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Interview not found")
+    await svc.delete_interview(id)
+    return success_response({"id": id}, "Interview cancelled")
+
+
 @router.post("/{id}/pass", response_model=APIResponse)
 async def pass_interview(id: str, notes: str = ''):
     svc = InterviewService()
@@ -219,17 +252,26 @@ async def ws_vision_proctoring(websocket: WebSocket, interview_id: str):
             pass
 
 
-# In-memory connection pool for 1-on-1 chat
+# In-memory connection pool for 1-on-1 chat + WebRTC signaling
 chat_connections: dict = {}  # interview_id -> {recruiter: ws, candidate: ws}
 
 @router.websocket('/ws/recruiter-chat/{interview_id}')
 async def ws_recruiter_chat(websocket: WebSocket, interview_id: str, role: str = 'candidate'):
-    """1-on-1 recruiter <-> candidate chat WebSocket relay."""
+    """1-on-1 recruiter <-> candidate chat + WebRTC signaling relay for the live meeting room."""
     await websocket.accept()
     if interview_id not in chat_connections:
         chat_connections[interview_id] = {}
     chat_connections[interview_id][role] = websocket
-    
+
+    other_role = 'candidate' if role == 'recruiter' else 'recruiter'
+    other_ws = chat_connections.get(interview_id, {}).get(other_role)
+    # Let the other party know a peer has (re)joined so they can (re)start the WebRTC offer.
+    if other_ws:
+        try:
+            await other_ws.send_text(json.dumps({'type': 'peer_joined', 'role': role}))
+        except Exception:
+            pass
+
     try:
         import firebase_admin.firestore
         from datetime import datetime, timezone
@@ -239,6 +281,18 @@ async def ws_recruiter_chat(websocket: WebSocket, interview_id: str, role: str =
             data = await websocket.receive_text()
             try:
                 msg = json.loads(data)
+
+                # WebRTC signaling (offer/answer/ice-candidate) — just relay to the other
+                # party untouched, no persistence needed for signaling payloads.
+                if msg.get('type') in ('webrtc_offer', 'webrtc_answer', 'webrtc_ice'):
+                    other_ws = chat_connections.get(interview_id, {}).get(other_role)
+                    if other_ws:
+                        try:
+                            await other_ws.send_text(json.dumps({**msg, 'sender_role': role}))
+                        except Exception:
+                            pass
+                    continue
+
                 content = msg.get('content', '')
                 timestamp = datetime.now(timezone.utc).isoformat()
                 
@@ -251,7 +305,6 @@ async def ws_recruiter_chat(websocket: WebSocket, interview_id: str, role: str =
                 })
                 
                 # Relay to the other party
-                other_role = 'candidate' if role == 'recruiter' else 'recruiter'
                 other_ws = chat_connections.get(interview_id, {}).get(other_role)
                 
                 relay_msg = json.dumps({
@@ -275,6 +328,14 @@ async def ws_recruiter_chat(websocket: WebSocket, interview_id: str, role: str =
     except WebSocketDisconnect:
         if interview_id in chat_connections:
             chat_connections[interview_id].pop(role, None)
+            # Tell the other party we left so they can tear down their peer connection.
+            remaining_ws = chat_connections.get(interview_id, {}).get(other_role)
+            if remaining_ws:
+                try:
+                    await remaining_ws.send_text(json.dumps({'type': 'peer_left', 'role': role}))
+                except Exception:
+                    pass
+
 
 
 # ── Code Submission & Scoring ────────────────────────────────────────────────

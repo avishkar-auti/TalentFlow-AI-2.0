@@ -46,10 +46,11 @@ export default function Candidates() {
             { id: 'C-103', name: 'Charlie Davis', email: 'charlie@example.com', job_id: 'JOB-20260724-XYZ789', atsScore: 82, pipeline_stage: 'interview', skills_match: 80, exp_match: 85, edu_match: 80 },
           ];
         }
-        // Normalize field names
-        candList = candList.map(c => ({
+        // Normalize field names — keep null/undefined scores as null (not yet analyzed)
+        // instead of coercing to 0, so the UI can distinguish "no score" from "scored 0".
+        candList = candList.map((c: any) => ({
           ...c,
-          ats_score: c.atsScore || c.ats_score || 0,
+          ats_score: c.atsScore ?? c.ats_score ?? null,
           stage: c.pipeline_stage || c.stage || 'applied'
         }));
         setCandidates(candList);
@@ -175,12 +176,13 @@ export default function Candidates() {
         </div>
         <div className="w-full md:w-48 relative">
           <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <select 
+          <select
             value={jobFilter} onChange={(e) => setJobFilter(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-navy-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-gray-900 dark:text-white appearance-none"
+            style={{ colorScheme: 'light', backgroundColor: '#fff', color: '#111827' }}
+            className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-sm focus:ring-2 focus:ring-indigo-500 outline-none appearance-none"
           >
-            <option value="">All Jobs</option>
-            {jobs.map(j => <option key={j.id || j.job_id} value={j.id || j.job_id}>{j.title}</option>)}
+            <option value="" style={{ backgroundColor: '#fff', color: '#111827' }}>All Jobs</option>
+            {jobs.map(j => <option key={j.id || j.job_id} value={j.id || j.job_id} style={{ backgroundColor: '#fff', color: '#111827' }}>{j.title}</option>)}
           </select>
         </div>
         <div className="flex items-center gap-3 w-full md:w-auto px-2">
@@ -233,27 +235,33 @@ export default function Candidates() {
                     </td>
                     <td className="p-4">
                       <div className="flex items-center gap-3">
-                        <span className={`text-lg font-bold ${cand.ats_score >= 70 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{cand.ats_score}%</span>
-                        <div className="w-16 h-1.5 flex bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                          <div className="bg-indigo-500 h-full" style={{ width: `${cand.skills_match || cand.ats_score}%` }}></div>
-                          <div className="bg-emerald-500 h-full" style={{ width: `${cand.exp_match || 0}%` }}></div>
-                          <div className="bg-amber-500 h-full" style={{ width: `${cand.edu_match || 0}%` }}></div>
-                        </div>
+                        {cand.ats_score == null ? (
+                          <span className="text-sm font-medium text-gray-400 dark:text-gray-500 italic">Not analyzed</span>
+                        ) : (
+                          <>
+                            <span className={`text-lg font-bold ${cand.ats_score >= 70 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{Math.round(cand.ats_score)}%</span>
+                            <div className="w-16 h-1.5 flex bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                              <div className="bg-indigo-500 h-full" style={{ width: `${cand.skills_match || cand.ats_score}%` }}></div>
+                              <div className="bg-emerald-500 h-full" style={{ width: `${cand.exp_match || 0}%` }}></div>
+                              <div className="bg-amber-500 h-full" style={{ width: `${cand.edu_match || 0}%` }}></div>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </td>
                     <td className="p-4">
-                      <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${getStageColor(cand.stage)}`}>
+                      <span className={`px-2.5 py-1 text-xs font-semibold rounded-full capitalize ${getStageColor(cand.stage)}`}>
                         {cand.stage || 'Applied'}
                       </span>
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex justify-end gap-2">
-                        {cand.ats_score >= 70 && cand.stage === 'Applied' && (
+                        {cand.ats_score >= 70 && cand.stage?.toLowerCase() === 'applied' && (
                           <button className="p-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20 rounded-lg transition-colors border border-emerald-100 dark:border-emerald-500/20" title="Shortlist">
                             <CheckCircle2 className="w-4 h-4" />
                           </button>
                         )}
-                        {(cand.stage === 'Shortlisted' || cand.stage?.includes('Interview')) && (
+                        {(cand.stage?.toLowerCase() === 'shortlisted' || cand.stage?.toLowerCase().includes('interview')) && (
                           <button onClick={() => { setActiveCandidate(cand); setShowScheduleModal(true); }} className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-400 dark:hover:bg-indigo-500/20 rounded-lg transition-colors border border-indigo-100 dark:border-indigo-500/20" title="Schedule Interview">
                             <Calendar className="w-4 h-4" />
                           </button>
@@ -290,9 +298,9 @@ export default function Candidates() {
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Job Role</label>
-                <select required value={addJobId} onChange={e=>setAddJobId(e.target.value)} className="w-full px-3 py-2 border rounded-xl dark:border-gray-700 bg-white dark:bg-navy-950 text-gray-900 dark:text-white">
-                  <option value="">Select Job...</option>
-                  {jobs.map(j => <option key={j.id||j.job_id} value={j.id||j.job_id}>{j.title}</option>)}
+                <select required value={addJobId} onChange={e=>setAddJobId(e.target.value)} style={{ colorScheme: 'light', backgroundColor: '#fff', color: '#111827' }} className="w-full px-3 py-2 border rounded-xl dark:border-gray-700">
+                  <option value="" style={{ backgroundColor: '#fff', color: '#111827' }}>Select Job...</option>
+                  {jobs.map(j => <option key={j.id||j.job_id} value={j.id||j.job_id} style={{ backgroundColor: '#fff', color: '#111827' }}>{j.title}</option>)}
                 </select>
               </div>
               <div className="pt-4 flex justify-end gap-2">

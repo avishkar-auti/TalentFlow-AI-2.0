@@ -8,6 +8,16 @@
   }
 }
 
+/* Without this, native form controls (select dropdown popups, scrollbars) render using
+   the OS's light/dark preference instead of this app's own .dark theme — causing
+   authored text colors to land on a mismatched native popup background and become unreadable. */
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+
 @layer utilities {
   .animate-fade-in {
     animation: fadeIn 0.3s ease-in-out;

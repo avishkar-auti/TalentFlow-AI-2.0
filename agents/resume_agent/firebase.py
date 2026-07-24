@@ -1,6 +1,5 @@
-"""
-Firebase Firestore & Storage Data Layer for Resume Agent.
-"""
+
+import asyncio
 import logging
 from typing import Dict, Any, Optional
 from backend.firebase import firestore, storage
@@ -16,10 +15,18 @@ async def get_analysis(candidate_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 async def save_resume_file_to_storage(candidate_id: str, file_bytes: bytes, filename: str) -> str:
-    """Uploads candidate resume PDF to Firebase Storage and returns signed/public URL."""
+    """Uploads candidate resume PDF to Firebase Storage and returns signed/public URL.
+
+    storage.upload_file is a synchronous (blocking) function, not a coroutine — it must
+    run in a thread via asyncio.to_thread so it doesn't block the event loop for every
+    other in-flight request while the upload is in progress.
+    """
     try:
         bucket_path = f"resumes/{candidate_id}/{filename}"
-        public_url = await storage.upload_file(bucket_path, file_bytes, content_type="application/pdf")
+        public_url = await asyncio.wait_for(
+            asyncio.to_thread(storage.upload_file, bucket_path, file_bytes, "application/pdf"),
+            timeout=20,
+        )
         logger.info(f"Uploaded resume for candidate {candidate_id} to Storage: {bucket_path}")
         return public_url
     except Exception as e:
@@ -38,13 +45,20 @@ async def save_analysis(candidate_id: str, analysis_data: Dict[str, Any]) -> Non
         )
 
         # 2. Also update top-level candidate summary fields in candidates/{candidateId}
-        summary_update = {
+        # Only include scores actually computed by this analysis — never fabricate a
+        # fallback number, since candidate_service.process_resume runs the real ATSEngine
+        # scoring afterward and a fake value here would just be misleading in the meantime.
+        summary_update: Dict[str, Any] = {
             "resumeParsed": True,
-            "atsScore": analysis_data.get("score", {}).get("ats_score", 85.0),
-            "resumeQualityScore": analysis_data.get("score", {}).get("resume_score", 88.0),
             "skillsCount": len(analysis_data.get("analysis", {}).get("skills", [])),
             "pipelineStage": "screening"
         }
+        ats_score = analysis_data.get("score", {}).get("ats_score")
+        if ats_score is not None:
+            summary_update["atsScore"] = ats_score
+        resume_score = analysis_data.get("score", {}).get("resume_score")
+        if resume_score is not None:
+            summary_update["resumeQualityScore"] = resume_score
         await firestore.set_document("candidates", candidate_id, summary_update, merge=True)
 
         logger.info(f"Saved resume analysis for candidate {candidate_id} to Firestore.")

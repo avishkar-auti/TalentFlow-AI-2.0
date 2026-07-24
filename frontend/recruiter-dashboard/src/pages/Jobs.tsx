@@ -202,12 +202,13 @@ export default function Jobs() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="w-full pl-10 pr-8 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-navy-900 text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-gray-900 dark:text-white appearance-none cursor-pointer transition-all"
+            style={{ colorScheme: 'light', backgroundColor: '#fff', color: '#111827' }}
+            className="w-full pl-10 pr-8 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm focus:ring-2 focus:ring-indigo-500 outline-none appearance-none cursor-pointer transition-all"
           >
-            <option value="">All Statuses</option>
-            <option value="active">Active</option>
-            <option value="paused">Paused</option>
-            <option value="closed">Closed</option>
+            <option value="" style={{ backgroundColor: '#fff', color: '#111827' }}>All Statuses</option>
+            <option value="active" style={{ backgroundColor: '#fff', color: '#111827' }}>Active</option>
+            <option value="paused" style={{ backgroundColor: '#fff', color: '#111827' }}>Paused</option>
+            <option value="closed" style={{ backgroundColor: '#fff', color: '#111827' }}>Closed</option>
           </select>
         </div>
       </div>
@@ -350,11 +351,12 @@ export default function Jobs() {
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Experience Level</label>
                     <select value={experienceLevel} onChange={(e) => setExperienceLevel(e.target.value)}
-                      className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-navy-950 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none appearance-none cursor-pointer">
-                      <option value="Junior">Junior</option>
-                      <option value="Mid">Mid</option>
-                      <option value="Senior">Senior</option>
-                      <option value="Lead">Lead</option>
+                      style={{ colorScheme: 'light', backgroundColor: '#fff', color: '#111827' }}
+                      className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none appearance-none cursor-pointer">
+                      <option value="Junior" style={{ backgroundColor: '#fff', color: '#111827' }}>Junior</option>
+                      <option value="Mid" style={{ backgroundColor: '#fff', color: '#111827' }}>Mid</option>
+                      <option value="Senior" style={{ backgroundColor: '#fff', color: '#111827' }}>Senior</option>
+                      <option value="Lead" style={{ backgroundColor: '#fff', color: '#111827' }}>Lead</option>
                     </select>
                   </div>
 

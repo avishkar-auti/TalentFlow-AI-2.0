@@ -393,18 +393,28 @@ export default function CandidateProfile() {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="bg-gray-50 dark:bg-navy-900/60 p-4 rounded-xl border border-gray-200 dark:border-gray-800 text-center">
                         <span className="text-xs text-gray-500 font-semibold block mb-1">ATS OVERALL SCORE</span>
-                        <span className={`text-3xl font-extrabold ${
-                          (resumeAnalysis.score?.ats_score ?? candidate?.atsScore ?? 85) >= 80 ? 'text-emerald-400' : 'text-amber-400'
-                        }`}>
-                          {Math.round(resumeAnalysis.score?.ats_score ?? candidate?.atsScore ?? 85)}%
-                        </span>
+                        {(() => {
+                          const atsScore = resumeAnalysis.score?.ats_score ?? candidate?.atsScore;
+                          return atsScore != null ? (
+                            <span className={`text-3xl font-extrabold ${atsScore >= 80 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                              {Math.round(atsScore)}%
+                            </span>
+                          ) : (
+                            <span className="text-sm text-gray-400 italic">Pending</span>
+                          );
+                        })()}
                       </div>
 
                       <div className="bg-gray-50 dark:bg-navy-900/60 p-4 rounded-xl border border-gray-200 dark:border-gray-800 text-center">
                         <span className="text-xs text-gray-500 font-semibold block mb-1">FORMATTING COMPATIBILITY</span>
-                        <span className="text-3xl font-extrabold text-blue-400">
-                          {Math.round(resumeAnalysis.atsFormattingScore ?? 90)}%
-                        </span>
+                        {(() => {
+                          const fmtScore = resumeAnalysis.atsFormattingScore ?? candidate?.atsBreakdown?.formatting_quality;
+                          return fmtScore != null ? (
+                            <span className="text-3xl font-extrabold text-blue-400">{Math.round(fmtScore)}%</span>
+                          ) : (
+                            <span className="text-sm text-gray-400 italic">Pending</span>
+                          );
+                        })()}
                       </div>
 
                       <div className="bg-gray-50 dark:bg-navy-900/60 p-4 rounded-xl border border-gray-200 dark:border-gray-800 text-center">
@@ -419,7 +429,9 @@ export default function CandidateProfile() {
                     <div>
                       <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Matched Job Keywords</h4>
                       <div className="flex flex-wrap gap-2">
-                        {(resumeAnalysis.score?.matched_keywords || ['react', 'typescript', 'python', 'api', 'docker']).map((kw: string, i: number) => (
+                        {(resumeAnalysis.score?.matched_keywords || candidate?.matched_keywords || []).length === 0 ? (
+                          <span className="text-xs text-gray-400 italic">No keyword data yet</span>
+                        ) : (resumeAnalysis.score?.matched_keywords || candidate?.matched_keywords || []).map((kw: string, i: number) => (
                           <span key={i} className="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold rounded-md uppercase">
                             ✓ {kw}
                           </span>
@@ -428,18 +440,21 @@ export default function CandidateProfile() {
                     </div>
 
                     {/* Missing Keywords */}
-                    {Array.isArray(resumeAnalysis.score?.missing_keywords) && resumeAnalysis.score.missing_keywords.length > 0 && (
+                    {(() => {
+                      const missing = resumeAnalysis.score?.missing_keywords || candidate?.missing_keywords || [];
+                      return Array.isArray(missing) && missing.length > 0 && (
                       <div>
                         <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Top Missing Keywords</h4>
                         <div className="flex flex-wrap gap-2">
-                          {resumeAnalysis.score.missing_keywords.map((kw: string, i: number) => (
+                          {missing.map((kw: string, i: number) => (
                             <span key={i} className="px-2.5 py-1 bg-red-500/10 text-red-400 border border-red-500/20 text-xs font-semibold rounded-md uppercase">
                               ✗ {kw}
                             </span>
                           ))}
                         </div>
                       </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Formatting Alerts */}
                     {Array.isArray(resumeAnalysis.formattingFlags) && resumeAnalysis.formattingFlags.length > 0 && (

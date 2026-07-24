@@ -14,6 +14,7 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { useFaceDetection } from '../hooks/useFaceDetection';
 import { ShieldAlert, Volume2, AlertOctagon, Users, Code, Eye, EyeOff } from 'lucide-react';
 import type { InterviewMessage } from '../types';
+import { WS_BASE_URL } from '../utils/constants';
 
 export function InterviewRoom() {
   const { id } = useParams<{ id: string }>();
@@ -22,6 +23,7 @@ export function InterviewRoom() {
   
   const queryParams = new URLSearchParams(location.search);
   const interviewMode = queryParams.get('mode') || 'ai_screening'; // hr_round, technical_coding, ai_screening
+  const joinRole = queryParams.get('role') || 'candidate'; // candidate | recruiter — recruiter joins the same room via the shared meet_link
   
   const [hasConsented, setHasConsented] = useState(false);
   const [isInterviewActive, setIsInterviewActive] = useState(false);
@@ -32,6 +34,8 @@ export function InterviewRoom() {
   const [isTerminated, setIsTerminated] = useState<boolean>(false);
   const [terminationReason, setTerminationReason] = useState<string>('');
   const [lastFlagTime, setLastFlagTime] = useState<number>(0);
+  const [liveChatConnected, setLiveChatConnected] = useState<boolean>(false);
+  const [remoteConnected, setRemoteConnected] = useState<boolean>(false);
 
   const { stream, isGranted, error: mediaError, requestPermissions, stopStream } = useMediaDevices();
   const { isListening, transcript, startListening, stopListening, setTranscript } = useSpeechRecognition();
@@ -40,9 +44,130 @@ export function InterviewRoom() {
   const { sendMessage, lastMessage, isConnected } = useWebSocket(isInterviewActive ? id : undefined);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const liveChatWsRef = useRef<WebSocket | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   // Hook up face-api.js detection
   const faceDetection = useFaceDetection(videoRef, isInterviewActive && !isTerminated);
+
+  // Keep a ref of the latest local media stream so the WebRTC peer connection (created
+  // inside a WebSocket callback closure) always attaches the current tracks.
+  useEffect(() => { streamRef.current = stream; }, [stream]);
+
+  // Build a fresh RTCPeerConnection wired to the local camera/mic and to the signaling
+  // channel (ICE candidates relayed over the same recruiter-chat WebSocket).
+  const createPeerConnection = () => {
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => pc.addTrack(track, streamRef.current as MediaStream));
+    }
+
+    pc.ontrack = (event) => {
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = event.streams[0];
+      }
+      setRemoteConnected(true);
+    };
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && liveChatWsRef.current?.readyState === WebSocket.OPEN) {
+        liveChatWsRef.current.send(JSON.stringify({ type: 'webrtc_ice', candidate: event.candidate }));
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+        setRemoteConnected(false);
+      }
+    };
+
+    pcRef.current = pc;
+    return pc;
+  };
+
+  const createAndSendOffer = async () => {
+    const pc = pcRef.current || createPeerConnection();
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    liveChatWsRef.current?.send(JSON.stringify({ type: 'webrtc_offer', offer }));
+  };
+
+  const teardownPeerConnection = () => {
+    pcRef.current?.close();
+    pcRef.current = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    setRemoteConnected(false);
+  };
+
+  // HR Round = a real human-to-human live meeting. Connect to the recruiter<->candidate
+  // chat relay (same channel the recruiter dashboard uses) so messages actually flow
+  // both ways in real time, and negotiate a live WebRTC video/audio call over the same
+  // channel so both parties can see & hear each other, not just chat.
+  useEffect(() => {
+    if (interviewMode !== 'hr_round' || !isInterviewActive || !id) return;
+
+    const ws = new WebSocket(`${WS_BASE_URL}/recruiter-chat/${id}?role=${joinRole}`);
+    liveChatWsRef.current = ws;
+
+    ws.onopen = () => {
+      setLiveChatConnected(true);
+      // The recruiter always initiates the video call offer — avoids both sides
+      // racing to create an offer at the same time (glare).
+      if (joinRole === 'recruiter') {
+        createAndSendOffer().catch(() => {});
+      }
+    };
+    ws.onclose = () => {
+      setLiveChatConnected(false);
+      teardownPeerConnection();
+    };
+    ws.onmessage = async (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'chat_message') {
+          setMessages(prev => [...prev, {
+            id: `${Date.now()}-${Math.random()}`,
+            sender: data.sender_role === 'recruiter' ? 'interviewer' : 'candidate',
+            content: data.content,
+            timestamp: data.timestamp || new Date().toISOString(),
+          }]);
+        } else if (data.type === 'peer_joined') {
+          // Other party just connected — recruiter (re)initiates the call now that
+          // someone is actually there to receive the offer.
+          if (joinRole === 'recruiter') {
+            await createAndSendOffer();
+          }
+        } else if (data.type === 'peer_left') {
+          teardownPeerConnection();
+        } else if (data.type === 'webrtc_offer') {
+          const pc = pcRef.current || createPeerConnection();
+          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          ws.send(JSON.stringify({ type: 'webrtc_answer', answer }));
+        } else if (data.type === 'webrtc_answer') {
+          await pcRef.current?.setRemoteDescription(new RTCSessionDescription(data.answer));
+        } else if (data.type === 'webrtc_ice' && data.candidate) {
+          try {
+            await pcRef.current?.addIceCandidate(new RTCIceCandidate(data.candidate));
+          } catch {
+            // ignore late/duplicate candidates
+          }
+        }
+      } catch {
+        // ignore malformed frames
+      }
+    };
+
+    return () => {
+      ws.close();
+      teardownPeerConnection();
+    };
+  }, [interviewMode, isInterviewActive, id, joinRole]);
 
   // Video frame extraction loop for real-time OpenCV vision proctoring
   useEffect(() => {
@@ -221,18 +346,34 @@ export function InterviewRoom() {
 
   const handleSendMessage = (text: string) => {
     if (!text.trim() || isTerminated) return;
-    
-    setMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      sender: 'candidate',
-      content: text,
-      timestamp: new Date().toISOString()
-    }]);
 
-    if (isConnected) {
-      sendMessage({ type: 'message', content: text });
+    if (interviewMode === 'hr_round') {
+      // Live human-to-human meeting: relay through the recruiter-chat channel so the
+      // other party (recruiter or candidate, whichever is on the other end) actually
+      // receives it. The server persists + relays; we optimistically echo locally.
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        sender: joinRole === 'recruiter' ? 'interviewer' : 'candidate',
+        content: text,
+        timestamp: new Date().toISOString()
+      }]);
+
+      if (liveChatWsRef.current && liveChatWsRef.current.readyState === WebSocket.OPEN) {
+        liveChatWsRef.current.send(JSON.stringify({ content: text }));
+      }
+    } else {
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        sender: 'candidate',
+        content: text,
+        timestamp: new Date().toISOString()
+      }]);
+
+      if (isConnected) {
+        sendMessage({ type: 'message', content: text });
+      }
     }
-    
+
     setTranscript('');
     stopListening();
   };
@@ -314,6 +455,13 @@ export function InterviewRoom() {
               <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
               {isConnected ? 'Server Conn: Active' : 'Reconnecting...'}
             </div>
+
+            {interviewMode === 'hr_round' && (
+              <div className="bg-black/60 backdrop-blur-sm text-white px-2.5 py-1 rounded-md text-xs flex items-center gap-2 border border-white/10">
+                <div className={`w-2 h-2 rounded-full ${liveChatConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                {liveChatConnected ? 'Live Meeting: Connected' : 'Connecting to meeting...'}
+              </div>
+            )}
             
             <div className="bg-black/60 backdrop-blur-sm text-white px-2.5 py-1 rounded-md text-xs flex items-center gap-2 border border-white/10">
               {faceDetection.isLoaded ? (
@@ -366,6 +514,17 @@ export function InterviewRoom() {
 
           <div className="flex-1 relative h-full">
             <VideoPreview stream={stream} className="absolute inset-0 rounded-none object-cover" videoRef={videoRef} />
+
+            {interviewMode === 'hr_round' && (
+              <div className="absolute bottom-4 right-4 w-32 h-24 rounded-lg overflow-hidden border-2 border-white/20 shadow-xl bg-black z-10">
+                <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                {!remoteConnected && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-[10px] text-gray-300 text-center px-2">
+                    Waiting for {joinRole === 'recruiter' ? 'candidate' : 'recruiter'}...
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </Card>
       </div>

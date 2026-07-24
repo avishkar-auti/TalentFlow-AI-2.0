@@ -26,17 +26,18 @@ export function ApplicationStatus() {
   const [isTerminated, setIsTerminated] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
 
-  // Mock ATS Data in case backend doesn't provide
+  // Real ATS data — populated from the candidate's actual resume analysis once available.
+  // null fields render an "analysis pending" state instead of a fabricated score.
   const [atsDetails, setAtsDetails] = useState<any>({
-    score: 85,
-    keywordMatch: 88,
-    skillOverlap: 82,
-    experienceMatch: 90,
-    educationMatch: 100,
-    sectionCompleteness: 95,
-    formattingQuality: 80,
-    matchedKeywords: ['React', 'TypeScript', 'Node.js', 'System Design', 'Agile'],
-    missingKeywords: ['GraphQL', 'Kubernetes']
+    score: null,
+    keywordMatch: null,
+    skillOverlap: null,
+    experienceMatch: null,
+    educationMatch: null,
+    sectionCompleteness: null,
+    formattingQuality: null,
+    matchedKeywords: [],
+    missingKeywords: []
   });
 
   useEffect(() => {
@@ -56,7 +57,7 @@ export function ApplicationStatus() {
           const cands = listRes?.data?.data;
           if (Array.isArray(cands) && cands.length > 0) {
             candId = cands[0].id || cands[0].candidateId;
-            localStorage.setItem('talentflow_candidate_id', candId);
+            if (candId) localStorage.setItem('talentflow_candidate_id', candId);
           }
         }
 
@@ -69,10 +70,22 @@ export function ApplicationStatus() {
             setCandidateData(data);
             const stage = data.pipeline_stage || data.stage || 'shortlisted';
             setCurrentStage(stage);
-            
-            // Set ATS details if provided
-            if (data.ats_score) {
-              setAtsDetails(prev => ({ ...prev, score: data.ats_score }));
+
+            // Pull the real ATS breakdown computed by the backend for this resume.
+            const score = data.atsScore ?? data.ats_score ?? data.overallScore ?? null;
+            const breakdown = data.atsBreakdown || {};
+            if (score !== null) {
+              setAtsDetails({
+                score: Math.round(score),
+                keywordMatch: breakdown.keyword_match ?? null,
+                skillOverlap: breakdown.skill_overlap ?? null,
+                experienceMatch: breakdown.experience_match ?? null,
+                educationMatch: breakdown.education_match ?? null,
+                sectionCompleteness: breakdown.section_completeness ?? null,
+                formattingQuality: breakdown.formatting_quality ?? null,
+                matchedKeywords: data.matched_keywords || [],
+                missingKeywords: data.missing_keywords || []
+              });
             }
           }
 
@@ -107,16 +120,16 @@ export function ApplicationStatus() {
   const isRejected = currentStage === 'rejected';
 
   // Render ATS Breakdown Bar
-  const renderAtsBar = (label: string, value: number, weight: string) => (
+  const renderAtsBar = (label: string, value: number | null, weight: string) => (
     <div className="mb-3 last:mb-0">
       <div className="flex justify-between text-xs mb-1">
         <span className="font-medium text-gray-700 dark:text-gray-300">{label} <span className="text-gray-400">({weight})</span></span>
-        <span className="font-semibold text-gray-900 dark:text-white">{value}%</span>
+        <span className="font-semibold text-gray-900 dark:text-white">{value != null ? `${Math.round(value)}%` : '—'}</span>
       </div>
       <div className="h-1.5 w-full bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-        <div 
-          className="h-full bg-primary-500 rounded-full transition-all duration-1000" 
-          style={{ width: `${value}%` }}
+        <div
+          className="h-full bg-primary-500 rounded-full transition-all duration-1000"
+          style={{ width: `${value ?? 0}%` }}
         />
       </div>
     </div>
@@ -303,8 +316,15 @@ export function ApplicationStatus() {
               </div>
             </CardHeader>
             <CardContent className="p-6">
+              {atsDetails.score === null ? (
+                <div className="text-center py-10">
+                  <Loader2 className="w-8 h-8 mx-auto text-gray-400 mb-3 animate-spin" />
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Your resume is still being analyzed by our ATS engine. Check back shortly.</p>
+                </div>
+              ) : (
+              <>
               <div className="flex flex-col md:flex-row gap-8 items-center md:items-start">
-                
+
                 {/* Score Ring */}
                 <div className="flex-shrink-0 flex flex-col items-center justify-center mt-2">
                   <div className="relative w-36 h-36 flex items-center justify-center">
@@ -365,6 +385,8 @@ export function ApplicationStatus() {
                   </div>
                 </div>
               </div>
+              </>
+              )}
             </CardContent>
           </Card>
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CandidateLayout } from './components/layout/CandidateLayout';
 import { Home } from './pages/Home';
@@ -16,6 +16,16 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (loading) return null;
   if (!isAuthenticated) return <Navigate to="/login" />;
   return <>{children}</>;
+}
+
+// Recruiters join a live interview meeting straight from the recruiter dashboard's
+// meet_link (?role=recruiter) — they don't have a candidate-portal session, so we
+// let that specific view through without requiring candidate login.
+function InterviewRouteGuard({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  const isRecruiterView = new URLSearchParams(location.search).get('role') === 'recruiter';
+  if (isRecruiterView) return <>{children}</>;
+  return <ProtectedRoute>{children}</ProtectedRoute>;
 }
 
 function AppRoutes() {
@@ -35,9 +45,9 @@ function AppRoutes() {
         } />
         
         <Route path="/interview/:id" element={
-          <ProtectedRoute>
+          <InterviewRouteGuard>
             <InterviewRoom />
-          </ProtectedRoute>
+          </InterviewRouteGuard>
         } />
         
         <Route path="/technical/:id" element={

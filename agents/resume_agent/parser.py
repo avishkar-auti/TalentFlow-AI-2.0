@@ -56,7 +56,8 @@ class ResumeParser:
             if re.search(r'\b' + re.escape(tech.lower()) + r'\b', text_lower):
                 extracted_skills.append({"name": tech, "category": "Technical", "level": "Proficient"})
 
-        # 3. Extract Companies & Experience hints
+        # 3. Extract Companies & Experience hints.
+        # Shapes must match the Experience pydantic model: company, title, description (List[str]).
         experience_list = []
         companies = []
         for line in lines:
@@ -65,31 +66,31 @@ class ResumeParser:
                     companies.append(line)
                     experience_list.append({
                         "company": line,
-                        "role": "Software Engineer",
-                        "duration": "1-3 Years",
-                        "description": line
+                        "title": "Software Engineer",
+                        "description": [line],
                     })
 
-        # 4. Extract Education
+        # 4. Extract Education — shape must match the Education model: institution, degree.
         education_list = []
         for line in lines:
             if any(degree in line.lower() for degree in ["bachelor", "master", "phd", "b.s", "m.s", "b.tech", "m.tech", "university", "college"]):
                 education_list.append({
                     "degree": line,
                     "institution": line,
-                    "year": "2022",
-                    "cgpa": "3.8/4.0"
                 })
 
         return {
             "parsedText": text[:1500],
+            "summary": text[:400],
             "email": emails[0] if emails else "",
             "phone": phones[0] if phones else "",
             "skills": extracted_skills,
             "education": education_list if education_list else [{"degree": "Bachelor of Science", "institution": "University"}],
-            "experience": "2+ Years",
+            # experience must be a list of Experience-shaped dicts, not a summary string.
+            "experience": experience_list,
             "companies": list(set(companies)),
-            "projects": [{"title": "Recruitment Automation Platform", "tech": ["Python", "FastAPI", "React"]}],
+            # projects must match the Project model: name, description, technologies.
+            "projects": [],
             "certifications": [],
             "missingKeywords": []
         }

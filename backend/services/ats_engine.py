@@ -22,11 +22,51 @@ class ATSEngine:
         'associate': 2, 'diploma': 1, 'high school': 0
     }
 
-    def compute_score(self, resume_text: str, job_data: dict, parsed_analysis: dict) -> dict:
-        """Return dict with total_score (0-100) + breakdown of all 6 factors."""
+    # Common skill/tech synonyms — real ATS tools (Jobscan, Greenhouse, Lever) normalize these
+    # before matching so "JS" vs "JavaScript" or "k8s" vs "kubernetes" don't score as misses.
+    SKILL_SYNONYMS = {
+        'js': 'javascript', 'ts': 'typescript', 'py': 'python',
+        'reactjs': 'react', 'react.js': 'react', 'vuejs': 'vue', 'vue.js': 'vue',
+        'nodejs': 'node', 'node.js': 'node', 'expressjs': 'express', 'express.js': 'express',
+        'nextjs': 'next', 'next.js': 'next', 'nestjs': 'nest', 'nest.js': 'nest',
+        'k8s': 'kubernetes', 'postgres': 'postgresql', 'mongo': 'mongodb',
+        'ml': 'machine learning', 'dl': 'deep learning', 'ai': 'artificial intelligence',
+        'nlp': 'natural language processing', 'cv': 'computer vision',
+        'gcp': 'google cloud', 'aws': 'amazon web services', 'azure': 'microsoft azure',
+        'ci/cd': 'continuous integration', 'cicd': 'continuous integration',
+        'oop': 'object oriented programming', 'dsa': 'data structures algorithms',
+        'html5': 'html', 'css3': 'css', 'golang': 'go', 'c sharp': 'c#',
+        'restapi': 'rest api', 'rest': 'rest api', 'graphql': 'graphql api',
+    }
+
+    @classmethod
+    def _normalize_token(cls, token: str) -> str:
+        t = token.lower().strip()
+        return cls.SKILL_SYNONYMS.get(t, t)
+
+    def compute_score(
+        self,
+        resume_text: str,
+        job_data: dict,
+        parsed_analysis: dict,
+        semantic_similarity: Optional[float] = None,
+    ) -> dict:
+        """Return dict with total_score (0-100) + breakdown of all 6 factors.
+
+        semantic_similarity: optional cosine similarity (0-1) between Gemini embeddings
+        of the resume and job description. When provided, it's blended 50/50 with the
+        lexical keyword-overlap score — this catches cases where wording differs but
+        meaning matches (e.g. resume says "built REST APIs", job wants "backend API
+        development"), which pure token overlap misses entirely.
+        """
         resume_text_lower = (resume_text or "").lower()
 
         keyword_score = self._keyword_match(resume_text_lower, job_data)
+        semantic_used = semantic_similarity is not None
+        if semantic_used:
+            semantic_pct = max(0.0, min(semantic_similarity, 1.0)) * 100
+            keyword_score = (keyword_score * 0.5) + (semantic_pct * 0.5)
+
         skill_score = self._skill_overlap(parsed_analysis.get('skills', []), job_data)
         exp_score = self._experience_match(resume_text_lower, parsed_analysis, job_data)
         edu_score = self._education_match(resume_text_lower, parsed_analysis, job_data)
@@ -61,6 +101,7 @@ class ATSEngine:
                 'section_completeness': 5,
                 'formatting_quality': 5,
             },
+            'semantic_match_used': semantic_used,
             'is_shortlistable': total >= 70,
         }
 
@@ -88,17 +129,34 @@ class ATSEngine:
             'ability', 'experience', 'role', 'required', 'strong', 'good', 'best'
         }
 
-        resume_tokens = set(re.findall(r'\b[a-zA-Z][a-zA-Z0-9+#.\-_]{1,}\b', resume_lower))
-        job_tokens = set(re.findall(r'\b[a-zA-Z][a-zA-Z0-9+#.\-_]{1,}\b', job_desc))
+        resume_tokens_raw = re.findall(r'\b[a-zA-Z][a-zA-Z0-9+#.\-_]{1,}\b', resume_lower)
+        job_tokens_raw = re.findall(r'\b[a-zA-Z][a-zA-Z0-9+#.\-_]{1,}\b', job_desc)
+
+        resume_tokens = {self._normalize_token(t) for t in resume_tokens_raw}
+        job_tokens = {self._normalize_token(t) for t in job_tokens_raw}
         job_keywords = {t for t in job_tokens if t not in stop_words and len(t) > 2}
 
         if not job_keywords:
             return 75.0
 
+        # Phrase-level (bigram) matching catches multi-word requirements like "machine learning"
+        # or "rest api" that single-token overlap would miss even after normalization.
+        resume_bigrams = {
+            f"{resume_tokens_raw[i]} {resume_tokens_raw[i+1]}".lower()
+            for i in range(len(resume_tokens_raw) - 1)
+        }
+        job_bigrams = {
+            f"{job_tokens_raw[i]} {job_tokens_raw[i+1]}".lower()
+            for i in range(len(job_tokens_raw) - 1)
+        }
+        matched_bigrams = resume_bigrams & job_bigrams
+
         matched = resume_tokens & job_keywords
         raw = (len(matched) / len(job_keywords)) * 100
+        # Small bonus for exact multi-word phrase matches — a stronger signal than single tokens
+        bigram_bonus = min(len(matched_bigrams) * 2, 15)
         # Apply 1.4x multiplier since TF-IDF weights common technical terms more
-        return min(raw * 1.4, 100.0)
+        return min(raw * 1.4 + bigram_bonus, 100.0)
 
     # ── Factor 2: Skill Overlap ─────────────────────────────────────────────────
 
@@ -116,7 +174,8 @@ class ATSEngine:
         if not required:
             return 70.0  # no skill requirement → neutral
 
-        resume_skill_lower = [str(s).lower().strip() for s in (resume_skills or [])]
+        required = [self._normalize_token(s) for s in required]
+        resume_skill_lower = [self._normalize_token(str(s)) for s in (resume_skills or [])]
 
         def fuzzy_match(req_skill: str, cand_skills: list) -> bool:
             for cs in cand_skills:
