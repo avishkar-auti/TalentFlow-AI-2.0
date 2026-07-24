@@ -6,7 +6,7 @@ $root = $PSScriptRoot
 $pythonCmd = if (Test-Path "$root\venv\Scripts\python.exe") { "$root\venv\Scripts\python.exe" } else { "python" }
 
 Write-Host "Starting Backend API on port 8000..." -ForegroundColor Green
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$root'; & '$pythonCmd' -m uvicorn backend.app:create_app --factory --reload --port 8000"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$root'; `$env:PYTHONPATH='$root'; & '$pythonCmd' -m backend.main"
 Start-Sleep -Seconds 2
 
 Write-Host "Starting Recruiter Dashboard on port 5173..." -ForegroundColor Green

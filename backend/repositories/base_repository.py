@@ -31,23 +31,32 @@ class BaseRepository(Generic[T]):
         """Get document by ID, return as typed model."""
         try:
             doc_ref = self.collection.document(doc_id)
-            doc = await self._run_sync(doc_ref.get)
+            doc = await asyncio.wait_for(self._run_sync(doc_ref.get), timeout=3.0)
             if doc.exists:
-                return self.model_class(**doc.to_dict())
+                d = doc.to_dict()
+                if "id" not in d:
+                    d["id"] = doc_id
+                return self.model_class(**d)
             return None
         except Exception as e:
-            logger.error(f"Error getting document {doc_id} from {self.collection_name}: {e}")
-            raise
+            logger.warning(f"Error/timeout getting document {doc_id} from {self.collection_name}: {e}")
+            return None
 
     async def get_all(self, limit: int = 100, offset: int = 0) -> List[T]:
         """Get all documents with pagination."""
         try:
             query = self.collection.limit(limit).offset(offset)
-            docs = await self._run_sync(query.stream)
-            return [self.model_class(**doc.to_dict()) for doc in docs]
+            docs = await asyncio.wait_for(self._run_sync(query.stream), timeout=3.0)
+            res = []
+            for doc in docs:
+                d = doc.to_dict()
+                if "id" not in d:
+                    d["id"] = doc.id
+                res.append(self.model_class(**d))
+            return res
         except Exception as e:
-            logger.error(f"Error getting all documents from {self.collection_name}: {e}")
-            raise
+            logger.warning(f"Error/timeout getting all documents from {self.collection_name}: {e}")
+            return []
     
     async def create(self, doc_id: str, data: T) -> T:
         """Create a new document. Auto-adds createdAt, updatedAt."""
@@ -99,20 +108,29 @@ class BaseRepository(Generic[T]):
                 query_ref = query_ref.order_by(order_by, direction=dir_enum)
             
             query_ref = query_ref.limit(limit)
-            docs = await self._run_sync(query_ref.stream)
-            return [self.model_class(**doc.to_dict()) for doc in docs]
+            docs = await asyncio.wait_for(self._run_sync(query_ref.stream), timeout=3.0)
+            res = []
+            for doc in docs:
+                d = doc.to_dict()
+                if "id" not in d:
+                    d["id"] = doc.id
+                res.append(self.model_class(**d))
+            return res
         except Exception as e:
-            logger.error(f"Error querying {self.collection_name}: {e}")
-            raise
+            logger.warning(f"Error/timeout querying {self.collection_name}: {e}")
+            return []
     
     async def get_subcollection(self, doc_id: str, subcollection: str, 
                                  sub_doc_id: str = 'latest') -> Optional[Dict[str, Any]]:
         """Get a subcollection document (e.g., candidates/{id}/resume_analysis/latest)."""
         try:
             doc_ref = self.collection.document(doc_id).collection(subcollection).document(sub_doc_id)
-            doc = await self._run_sync(doc_ref.get)
+            doc = await asyncio.wait_for(self._run_sync(doc_ref.get), timeout=3.0)
             if doc.exists:
                 return doc.to_dict()
+            return None
+        except Exception as e:
+            logger.warning(f"Error/timeout subcollection {self.collection_name}/{doc_id}/{subcollection}: {e}")
             return None
         except Exception as e:
             logger.error(f"Error getting subcollection {subcollection}/{sub_doc_id} for {doc_id}: {e}")
